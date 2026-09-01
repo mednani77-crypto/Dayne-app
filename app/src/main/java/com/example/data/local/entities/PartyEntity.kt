@@ -7,6 +7,8 @@ import androidx.room.PrimaryKey
 @Entity(
     tableName = "parties",
     indices = [
+        Index(value = ["ledgerId"]),
+        Index(value = ["ledgerId", "normalizedName"]),
         Index(value = ["normalizedName"]),
         Index(value = ["partyType"]),
         Index(value = ["isArchived"])
@@ -14,6 +16,8 @@ import androidx.room.PrimaryKey
 )
 data class PartyEntity(
     @PrimaryKey val id: String,
+    /** Logical book isolation. Existing v1.1 data is migrated to the default ledger. */
+    val ledgerId: String = "default-ledger",
     val name: String,
     val normalizedName: String,
     val phone: String? = null,
