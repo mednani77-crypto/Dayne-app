@@ -5,7 +5,6 @@ import androidx.biometric.BiometricPrompt
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentActivity
 import com.example.core.localization.AppLanguage
-import com.example.core.localization.FeatureStrings
 import com.example.core.localization.FeatureStringsProvider
 
 object BiometricLock {
