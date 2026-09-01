@@ -40,6 +40,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.core.formatting.AmountFormatter
 import com.example.core.formatting.DateFormatter
 import com.example.core.localization.AppLanguage
+import com.example.core.localization.AppStrings
 import com.example.core.localization.DeynBookLocalizationProvider
 import com.example.core.localization.FeatureStringsProvider
 import com.example.core.localization.LocalStrings
@@ -112,6 +113,7 @@ fun DeynBookAppV12(
     val currentLanguage = remember(settings?.languageCode) {
         AppLanguage.fromCode(settings?.languageCode ?: "ar")
     }
+    val nonComposableStrings = remember(currentLanguage) { AppStrings.get(currentLanguage) }
 
     var selectedTab by remember { mutableIntStateOf(0) }
     var activePartyId by remember { mutableStateOf<String?>(null) }
@@ -133,7 +135,6 @@ fun DeynBookAppV12(
 
     var pendingSharedUri by remember { mutableStateOf<Uri?>(null) }
     var pendingRestore by remember { mutableStateOf<V12BackupPackage?>(null) }
-
     var pendingExcelRange by remember { mutableStateOf(Long.MIN_VALUE to Long.MAX_VALUE) }
 
     val backupCreateLauncher = rememberLauncherForActivityResult(
@@ -147,9 +148,9 @@ fun DeynBookAppV12(
                         it.write(backup.toJsonString())
                     }
                 }
-                snackbarHostState.showSnackbar(LocalStrings.current.backupSuccess)
+                snackbarHostState.showSnackbar(nonComposableStrings.backupSuccess)
             } catch (_: Exception) {
-                snackbarHostState.showSnackbar(LocalStrings.current.errorGeneric)
+                snackbarHostState.showSnackbar(nonComposableStrings.errorGeneric)
             }
         }
     }
@@ -205,7 +206,7 @@ fun DeynBookAppV12(
                 }
                 pendingRestore = V12BackupService.parse(json)
             } catch (_: Exception) {
-                snackbarHostState.showSnackbar(LocalStrings.current.restoreInvalidFile)
+                snackbarHostState.showSnackbar(nonComposableStrings.restoreInvalidFile)
             }
         }
     }
@@ -213,26 +214,21 @@ fun DeynBookAppV12(
     LaunchedEffect(settings?.defaultCurrencyCode) {
         settings?.defaultCurrencyCode?.let(viewModel::setSelectedCurrencyCode)
     }
-
     LaunchedEffect(settings?.calendarMode) {
         DateFormatter.setCalendarMode(settings?.calendarMode ?: DateFormatter.CALENDAR_GREGORIAN)
     }
-
     LaunchedEffect(settings?.onboardingCompleted, settings?.businessName) {
         if (settings?.onboardingCompleted == true) v12Repository.syncDefaultLedgerFromSettings()
     }
-
     LaunchedEffect(scopedParties, activityTransactions) {
         collectionItems = viewModel.loadCollectionItems()
     }
-
     LaunchedEffect(userMessage) {
         userMessage?.let {
             snackbarHostState.showSnackbar(it)
             viewModel.clearUserMessage()
         }
     }
-
     LaunchedEffect(sharedUri, settings?.onboardingCompleted) {
         if (sharedUri != null && settings?.onboardingCompleted == true) {
             pendingSharedUri = sharedUri
@@ -424,7 +420,7 @@ fun DeynBookAppV12(
                                     onExportCsv = {
                                         viewModel.exportCsvToUriV12(
                                             language = currentLanguage,
-                                            launchDestination = { name, writer ->
+                                            launchDestination = { name, _ ->
                                                 scope.launch { snackbarHostState.showSnackbar(name) }
                                             }
                                         )
@@ -743,7 +739,9 @@ fun DeynBookAppV12(
                                 }
                             }) { Text(strings.restoreBackup) }
                         },
-                        dismissButton = { TextButton(onClick = { pendingRestore = null }) { Text(strings.cancel) } }
+                        dismissButton = {
+                            TextButton(onClick = { pendingRestore = null }) { Text(strings.cancel) }
+                        }
                     )
                 }
             }
