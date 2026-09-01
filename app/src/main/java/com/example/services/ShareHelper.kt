@@ -72,6 +72,30 @@ object ShareHelper {
         )
     }
 
+    /** Opens a pre-filled WhatsApp chat. The user still presses Send manually. */
+    fun openWhatsAppReminder(context: Context, phone: String?, text: String) {
+        val cleanPhone = phone.orEmpty().filter(Char::isDigit)
+        if (cleanPhone.isNotBlank()) {
+            val uri = Uri.parse("https://wa.me/$cleanPhone?text=${Uri.encode(text)}")
+            val direct = Intent(Intent.ACTION_VIEW, uri).apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) }
+            try {
+                context.startActivity(direct)
+                return
+            } catch (_: Exception) {
+            }
+        }
+
+        val share = Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_TEXT, text)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        try {
+            context.startActivity(Intent.createChooser(share, "WhatsApp").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        } catch (_: Exception) {
+        }
+    }
+
     fun dialPhoneNumber(context: Context, phone: String) {
         val cleanPhone = phone.trim()
         if (cleanPhone.isEmpty()) return
