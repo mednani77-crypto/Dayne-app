@@ -61,7 +61,7 @@ fun ReportsScreen(
     currencies: List<CurrencyEntity>,
     parties: List<PartyWithBalances>,
     onLoadReport: suspend (currencyCode: String, fromTime: Long, toTime: Long, partyId: String?) -> TransactionReportSummary,
-    onExportCsv: () -> Unit
+    onExportCsv: (fromTime: Long, toTime: Long) -> Unit
 ) {
     val strings = LocalStrings.current
     val context = LocalContext.current
@@ -108,7 +108,7 @@ fun ReportsScreen(
                 title = { Text(strings.reportsTitle, fontWeight = FontWeight.Bold) },
                 actions = {
                     Button(
-                        onClick = onExportCsv,
+                        onClick = { onExportCsv(range.first, range.second) },
                         modifier = Modifier.padding(end = 8.dp).testTag("export_csv_button")
                     ) {
                         androidx.compose.material3.Icon(Icons.Default.FileDownload, contentDescription = null)
