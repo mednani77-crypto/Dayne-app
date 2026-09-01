@@ -11,6 +11,15 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
+fun MainViewModel.configureOnboardingCurrencies(primaryCurrencyCode: String) {
+    viewModelScope.launch {
+        val enabledCodes = if (primaryCurrencyCode == "USD") setOf("USD") else setOf(primaryCurrencyCode, "USD")
+        repository.getAllCurrencies().forEach { currency ->
+            repository.setCurrencyEnabled(currency.code, currency.code in enabledCodes)
+        }
+    }
+}
+
 fun MainViewModel.createPartyWithCallback(
     name: String,
     phone: String?,
