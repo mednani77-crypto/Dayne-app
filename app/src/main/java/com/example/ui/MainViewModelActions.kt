@@ -1,11 +1,15 @@
 package com.example.ui
 
+import android.app.Application
+import android.net.Uri
 import androidx.lifecycle.viewModelScope
 import com.example.data.models.PartyType
 import com.example.data.models.TransactionReportSummary
 import com.example.data.models.TransactionType
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 fun MainViewModel.createPartyWithCallback(
     name: String,
@@ -33,6 +37,32 @@ fun MainViewModel.createPartyWithCallback(
             occurredAt = openingOccurredAt
         )
         onCreated(id)
+    }
+}
+
+fun MainViewModel.exportBackupToUri(uri: Uri) {
+    viewModelScope.launch {
+        val backup = repository.exportBackupData()
+        withContext(Dispatchers.IO) {
+            getApplication<Application>().contentResolver.openOutputStream(uri, "wt")?.use { stream ->
+                stream.writer(Charsets.UTF_8).buffered().use { writer ->
+                    writer.write(backup.toJsonString())
+                }
+            }
+        }
+    }
+}
+
+fun MainViewModel.exportCsvToUri(uri: Uri) {
+    viewModelScope.launch {
+        val csv = repository.exportAllTransactionsToCsv()
+        withContext(Dispatchers.IO) {
+            getApplication<Application>().contentResolver.openOutputStream(uri, "wt")?.use { stream ->
+                stream.writer(Charsets.UTF_8).buffered().use { writer ->
+                    writer.write(csv)
+                }
+            }
+        }
     }
 }
 
