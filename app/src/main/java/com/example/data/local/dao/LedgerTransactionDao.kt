@@ -13,8 +13,20 @@ interface LedgerTransactionDao {
     @Query("SELECT * FROM ledger_transactions ORDER BY occurredAt DESC, createdAt DESC")
     fun getAllTransactionsFlow(): Flow<List<LedgerTransactionEntity>>
 
+    @Query(
+        "SELECT t.* FROM ledger_transactions t INNER JOIN parties p ON p.id = t.partyId " +
+            "WHERE p.ledgerId = :ledgerId ORDER BY t.occurredAt DESC, t.createdAt DESC"
+    )
+    fun getAllTransactionsForLedgerFlow(ledgerId: String): Flow<List<LedgerTransactionEntity>>
+
     @Query("SELECT * FROM ledger_transactions ORDER BY occurredAt DESC, createdAt DESC LIMIT :limit")
     fun getRecentTransactionsFlow(limit: Int): Flow<List<LedgerTransactionEntity>>
+
+    @Query(
+        "SELECT t.* FROM ledger_transactions t INNER JOIN parties p ON p.id = t.partyId " +
+            "WHERE p.ledgerId = :ledgerId ORDER BY t.occurredAt DESC, t.createdAt DESC LIMIT :limit"
+    )
+    fun getRecentTransactionsForLedgerFlow(ledgerId: String, limit: Int): Flow<List<LedgerTransactionEntity>>
 
     @Query("SELECT * FROM ledger_transactions WHERE partyId = :partyId ORDER BY occurredAt DESC, createdAt DESC")
     fun getTransactionsByPartyIdFlow(partyId: String): Flow<List<LedgerTransactionEntity>>
@@ -36,6 +48,12 @@ interface LedgerTransactionDao {
 
     @Query("SELECT * FROM ledger_transactions")
     suspend fun getAllTransactions(): List<LedgerTransactionEntity>
+
+    @Query(
+        "SELECT t.* FROM ledger_transactions t INNER JOIN parties p ON p.id = t.partyId " +
+            "WHERE p.ledgerId = :ledgerId ORDER BY t.occurredAt DESC, t.createdAt DESC"
+    )
+    suspend fun getAllTransactionsForLedger(ledgerId: String): List<LedgerTransactionEntity>
 
     @Query("SELECT COUNT(*) FROM ledger_transactions WHERE partyId = :partyId")
     suspend fun getTransactionCountForParty(partyId: String): Int
