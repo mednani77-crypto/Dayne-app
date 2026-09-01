@@ -1,5 +1,7 @@
 package com.example.ui
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -72,6 +74,28 @@ fun DeynBookApp(viewModel: MainViewModel = viewModel()) {
         AppLanguage.fromCode(settings?.languageCode ?: "ar")
     }
 
+    val backupCreateLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("application/json")
+    ) { uri ->
+        uri?.let(viewModel::exportBackupToUri)
+    }
+
+    val csvCreateLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("text/csv")
+    ) { uri ->
+        uri?.let(viewModel::exportCsvToUri)
+    }
+
+    fun requestBackupDestination() {
+        val date = DateFormatter.formatForFileName(System.currentTimeMillis())
+        backupCreateLauncher.launch("DeynBook_Backup_$date.deynbook.json")
+    }
+
+    fun requestCsvDestination() {
+        val date = DateFormatter.formatForFileName(System.currentTimeMillis())
+        csvCreateLauncher.launch("DeynBook_Transactions_$date.csv")
+    }
+
     var selectedTab by remember { mutableIntStateOf(0) }
     var activePartyId by remember { mutableStateOf<String?>(null) }
 
@@ -103,6 +127,7 @@ fun DeynBookApp(viewModel: MainViewModel = viewModel()) {
                     currentLanguage = currentLanguage,
                     onLanguageSelected = viewModel::setLanguage,
                     onFinishOnboarding = { lang, country, currency, name, phone ->
+                        viewModel.configureOnboardingCurrencies(currency)
                         viewModel.completeOnboarding(lang, country, currency, name, phone)
                     }
                 )
@@ -242,7 +267,7 @@ fun DeynBookApp(viewModel: MainViewModel = viewModel()) {
                                 onLoadReport = { currency, from, to, partyId ->
                                     viewModel.loadReportSummary(currency, from, to, partyId)
                                 },
-                                onExportCsv = viewModel::exportCsv
+                                onExportCsv = ::requestCsvDestination
                             )
 
                             else -> settings?.let { currentSettings ->
@@ -254,9 +279,9 @@ fun DeynBookApp(viewModel: MainViewModel = viewModel()) {
                                     onLanguageChange = viewModel::setLanguage,
                                     onToggleCurrency = viewModel::toggleCurrency,
                                     onAddCustomCurrency = viewModel::addCustomCurrency,
-                                    onExportBackup = viewModel::exportBackup,
+                                    onExportBackup = ::requestBackupDestination,
                                     onImportBackupFile = viewModel::parseBackupFromUri,
-                                    onExportCsv = viewModel::exportCsv,
+                                    onExportCsv = ::requestCsvDestination,
                                     onResetAllData = viewModel::resetAllData
                                 )
                             }
