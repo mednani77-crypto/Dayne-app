@@ -21,7 +21,6 @@ import kotlinx.coroutines.flow.combine
 import java.util.Calendar
 import java.util.UUID
 
-/** Active-ledger domain layer for DeynBook 1.2. */
 class DeynBookV12Repository(private val database: AppDatabase) {
     private val settingsDao = database.settingsDao()
     private val currencyDao = database.currencyDao()
@@ -44,9 +43,11 @@ class DeynBookV12Repository(private val database: AppDatabase) {
 
     suspend fun getActiveLedger(): LedgerEntity {
         val settings = settingsDao.getSettings() ?: AppDatabase.DEFAULT_SETTINGS
-        return ledgerDao.getById(settings.activeLedgerId)
-            ?: ledgerDao.getAll().firstOrNull { !it.isArchived }
-            ?: AppDatabase.defaultLedgerFromSettings(settings).also(ledgerDao::insert)
+        ledgerDao.getById(settings.activeLedgerId)?.let { return it }
+        ledgerDao.getAll().firstOrNull { !it.isArchived }?.let { return it }
+        val created = AppDatabase.defaultLedgerFromSettings(settings)
+        ledgerDao.insert(created)
+        return created
     }
 
     suspend fun switchLedger(ledgerId: String): Boolean = database.withTransaction {
@@ -79,10 +80,10 @@ class DeynBookV12Repository(private val database: AppDatabase) {
         val ledger = LedgerEntity(
             id = UUID.randomUUID().toString(),
             name = name.trim().ifBlank { "DeynBook" },
-            phone = phone?.trim()?.takeIf(String::isNotBlank),
-            address = address?.trim()?.takeIf(String::isNotBlank),
-            countryCode = countryCode,
-            defaultCurrencyCode = defaultCurrencyCode,
+            phone = phone?.trim()?.takeIf { it.isNotBlank() },
+            address = address?.trim()?.takeIf { it.isNotBlank() },
+            countryCode = countryCode.ifBlank { "DJ" },
+            defaultCurrencyCode = defaultCurrencyCode.ifBlank { "DJF" },
             createdAt = now,
             updatedAt = now
         )
@@ -103,12 +104,13 @@ class DeynBookV12Repository(private val database: AppDatabase) {
     }
 
     suspend fun updateLedger(ledger: LedgerEntity) = database.withTransaction {
+        val now = System.currentTimeMillis()
         val updated = ledger.copy(
             name = ledger.name.trim().ifBlank { "DeynBook" },
-            phone = ledger.phone?.trim()?.takeIf(String::isNotBlank),
-            address = ledger.address?.trim()?.takeIf(String::isNotBlank),
-            footerNote = ledger.footerNote?.trim()?.takeIf(String::isNotBlank),
-            updatedAt = System.currentTimeMillis()
+            phone = ledger.phone?.trim()?.takeIf { it.isNotBlank() },
+            address = ledger.address?.trim()?.takeIf { it.isNotBlank() },
+            footerNote = ledger.footerNote?.trim()?.takeIf { it.isNotBlank() },
+            updatedAt = now
         )
         ledgerDao.update(updated)
         val settings = settingsDao.getSettings()
@@ -120,7 +122,7 @@ class DeynBookV12Repository(private val database: AppDatabase) {
                     businessAddress = updated.address,
                     countryCode = updated.countryCode,
                     defaultCurrencyCode = updated.defaultCurrencyCode,
-                    updatedAt = updated.updatedAt
+                    updatedAt = now
                 )
             )
         }
@@ -139,8 +141,7 @@ class DeynBookV12Repository(private val database: AppDatabase) {
     }
 
     suspend fun deleteLedgerIfEmpty(ledgerId: String): Boolean = database.withTransaction {
-        val all = ledgerDao.getAll()
-        if (all.size <= 1) return@withTransaction false
+        if (ledgerDao.getAll().size <= 1) return@withTransaction false
         if (partyDao.countForLedger(ledgerId) > 0) return@withTransaction false
         val settings = settingsDao.getSettings() ?: AppDatabase.DEFAULT_SETTINGS
         if (settings.activeLedgerId == ledgerId) return@withTransaction false
@@ -151,11 +152,15 @@ class DeynBookV12Repository(private val database: AppDatabase) {
     suspend fun syncDefaultLedgerFromSettings() {
         val settings = settingsDao.getSettings() ?: return
         val active = ledgerDao.getById(settings.activeLedgerId)
-        if (active == null || (active.id == AppDatabase.DEFAULT_LEDGER_ID && active.name == "DeynBook")) {
-            val old = ledgerDao.getById(AppDatabase.DEFAULT_LEDGER_ID)
-            ledgerDao.insert(
-                (old ?: AppDatabase.defaultLedgerFromSettings(settings)).copy(
-                    name = settings.businessName.ifBlank { old?.name ?: "DeynBook" },
+        if (active == null) {
+            val created = AppDatabase.defaultLedgerFromSettings(settings)
+            ledgerDao.insert(created)
+            return
+        }
+        if (active.id == AppDatabase.DEFAULT_LEDGER_ID && active.name == "DeynBook" && settings.businessName.isNotBlank()) {
+            ledgerDao.update(
+                active.copy(
+                    name = settings.businessName,
                     phone = settings.businessPhone,
                     address = settings.businessAddress,
                     countryCode = settings.countryCode,
@@ -168,9 +173,14 @@ class DeynBookV12Repository(private val database: AppDatabase) {
 
     suspend fun assignPartyToActiveLedger(partyId: String) {
         val party = partyDao.getPartyById(partyId) ?: return
-        val ledger = getActiveLedger()
-        if (party.ledgerId != ledger.id) {
-            partyDao.updateParty(party.copy(ledgerId = ledger.id, updatedAt = System.currentTimeMillis()))
+        val active = getActiveLedger()
+        if (party.ledgerId != active.id) {
+            partyDao.updateParty(
+                party.copy(
+                    ledgerId = active.id,
+                    updatedAt = System.currentTimeMillis()
+                )
+            )
         }
     }
 
@@ -185,21 +195,22 @@ class DeynBookV12Repository(private val database: AppDatabase) {
         val scopedPartyIds = scopedParties.mapTo(hashSetOf()) { it.id }
         val scopedTransactions = transactions.filter { it.partyId in scopedPartyIds }
         val currencyMap = currencies.associateBy { it.code }
-        val txByParty = scopedTransactions.groupBy { it.partyId }
+        val byParty = scopedTransactions.groupBy { it.partyId }
+
         scopedParties.map { party ->
-            val partyTxs = txByParty[party.id].orEmpty()
-            val balances = partyTxs.map { it.currencyCode }.distinct().map { code ->
+            val partyTx = byParty[party.id].orEmpty()
+            val balances = partyTx.map { it.currencyCode }.distinct().map { code ->
                 PartyCurrencyBalance.calculateFromTransactions(
-                    code,
-                    currencyMap[code]?.decimalPlaces ?: 0,
-                    partyTxs
+                    currencyCode = code,
+                    decimalPlaces = currencyMap[code]?.decimalPlaces ?: 0,
+                    transactions = partyTx
                 )
             }
             PartyWithBalances(
                 party = party,
                 balances = balances,
-                transactionCount = partyTxs.size,
-                lastTransactionTime = partyTxs.maxOfOrNull { it.occurredAt }
+                transactionCount = partyTx.size,
+                lastTransactionTime = partyTx.maxOfOrNull { it.occurredAt }
             )
         }
     }
@@ -210,8 +221,7 @@ class DeynBookV12Repository(private val database: AppDatabase) {
         txDao.getAllTransactionsFlow()
     ) { settings, parties, transactions ->
         val ledgerId = settings?.activeLedgerId ?: AppDatabase.DEFAULT_LEDGER_ID
-        val scopedParties = parties.filter { it.ledgerId == ledgerId }
-        val partyMap = scopedParties.associateBy { it.id }
+        val partyMap = parties.filter { it.ledgerId == ledgerId }.associateBy { it.id }
         transactions.asSequence()
             .filter { it.partyId in partyMap }
             .sortedWith(
@@ -221,7 +231,12 @@ class DeynBookV12Repository(private val database: AppDatabase) {
             .take(limit)
             .map { tx ->
                 val party = partyMap.getValue(tx.partyId)
-                TransactionWithParty(tx, party.name, party.phone, party.partyType)
+                TransactionWithParty(
+                    transaction = tx,
+                    partyName = party.name,
+                    partyPhone = party.phone,
+                    partyType = party.partyType
+                )
             }
             .toList()
     }
@@ -237,35 +252,36 @@ class DeynBookV12Repository(private val database: AppDatabase) {
         val partyIds = scopedParties.mapTo(hashSetOf()) { it.id }
         val scopedTx = transactions.filter { it.partyId in partyIds }
         val decimals = currencies.firstOrNull { it.code == currencyCode }?.decimalPlaces ?: 0
-        val txByParty = scopedTx.groupBy { it.partyId }
+        val byParty = scopedTx.groupBy { it.partyId }
 
         var receivable = 0L
         var payable = 0L
         var customerCount = 0
         var supplierCount = 0
-        val top = mutableListOf<DashboardPartyAmount>()
+        val topDebtors = mutableListOf<DashboardPartyAmount>()
+
         scopedParties.forEach { party ->
             val balance = PartyCurrencyBalance.calculateFromTransactions(
                 currencyCode,
                 decimals,
-                txByParty[party.id].orEmpty()
+                byParty[party.id].orEmpty()
             )
-            val partyType = PartyType.from(party.partyType)
-            if ((partyType == PartyType.CUSTOMER || partyType == PartyType.BOTH) && balance.customerBalance > 0L) {
+            val type = PartyType.from(party.partyType)
+            if ((type == PartyType.CUSTOMER || type == PartyType.BOTH) && balance.customerBalance > 0L) {
                 receivable = Math.addExact(receivable, balance.customerBalance)
                 customerCount++
-                top += DashboardPartyAmount(party.id, party.name, balance.customerBalance)
+                topDebtors += DashboardPartyAmount(party.id, party.name, balance.customerBalance)
             }
-            if ((partyType == PartyType.SUPPLIER || partyType == PartyType.BOTH) && balance.supplierBalance > 0L) {
+            if ((type == PartyType.SUPPLIER || type == PartyType.BOTH) && balance.supplierBalance > 0L) {
                 payable = Math.addExact(payable, balance.supplierBalance)
                 supplierCount++
             }
         }
 
         val now = System.currentTimeMillis()
-        val collectionItems = CollectionCalculator.calculate(scopedParties, scopedTx, currencies, now)
+        val collections = CollectionCalculator.calculate(scopedParties, scopedTx, currencies, now)
             .filter { it.currencyCode == currencyCode }
-        val startMonth = Calendar.getInstance().apply {
+        val monthStart = Calendar.getInstance().apply {
             timeInMillis = now
             set(Calendar.DAY_OF_MONTH, 1)
             set(Calendar.HOUR_OF_DAY, 0)
@@ -273,13 +289,14 @@ class DeynBookV12Repository(private val database: AppDatabase) {
             set(Calendar.SECOND, 0)
             set(Calendar.MILLISECOND, 0)
         }.timeInMillis
-        val endWeek = DateFormatter.endOfDay(now + 7L * 24L * 60L * 60L * 1000L)
-        val collected = scopedTx.asSequence()
-            .filter { it.currencyCode == currencyCode && it.occurredAt >= startMonth }
+        val next7End = DateFormatter.endOfDay(now + 7L * 86_400_000L)
+
+        val collectedThisMonth = scopedTx.asSequence()
+            .filter { it.currencyCode == currencyCode && it.occurredAt >= monthStart }
             .filter { TransactionType.from(it.transactionType) == TransactionType.CUSTOMER_PAYMENT }
             .fold(0L) { acc, tx -> Math.addExact(acc, tx.amountMinor) }
-        val paidSuppliers = scopedTx.asSequence()
-            .filter { it.currencyCode == currencyCode && it.occurredAt >= startMonth }
+        val paidSuppliersThisMonth = scopedTx.asSequence()
+            .filter { it.currencyCode == currencyCode && it.occurredAt >= monthStart }
             .filter { TransactionType.from(it.transactionType) == TransactionType.SUPPLIER_PAYMENT }
             .fold(0L) { acc, tx -> Math.addExact(acc, tx.amountMinor) }
 
@@ -290,13 +307,13 @@ class DeynBookV12Repository(private val database: AppDatabase) {
             totalPayable = payable,
             activeCustomerCount = customerCount,
             activeSupplierCount = supplierCount,
-            overdueCount = collectionItems.count { it.dueAt < DateFormatter.startOfDay(now) },
-            dueNext7DaysCount = collectionItems.count {
-                it.dueAt in DateFormatter.startOfDay(now)..endWeek
+            overdueCount = collections.count { it.dueAt < DateFormatter.startOfDay(now) },
+            dueNext7DaysCount = collections.count {
+                it.dueAt in DateFormatter.startOfDay(now)..next7End
             },
-            collectedThisMonth = collected,
-            paidToSuppliersThisMonth = paidSuppliers,
-            topDebtors = top.sortedByDescending { it.amountMinor }.take(5)
+            collectedThisMonth = collectedThisMonth,
+            paidToSuppliersThisMonth = paidSuppliersThisMonth,
+            topDebtors = topDebtors.sortedByDescending { it.amountMinor }.take(5)
         )
     }
 
@@ -307,49 +324,55 @@ class DeynBookV12Repository(private val database: AppDatabase) {
     ): TransactionReportSummary {
         val ledger = getActiveLedger()
         val parties = partyDao.getAllPartiesForLedger(ledger.id)
-        val txs = txDao.getAllTransactionsForLedger(ledger.id)
+        val transactions = txDao.getAllTransactionsForLedger(ledger.id)
         val decimals = currencyDao.getCurrencyByCode(currencyCode)?.decimalPlaces ?: 0
-        val txByParty = txs.groupBy { it.partyId }
+        val byParty = transactions.groupBy { it.partyId }
 
-        var totalReceivable = 0L
-        var totalPayable = 0L
+        var receivable = 0L
+        var payable = 0L
         var customerCredits = 0L
         var supplierAdvances = 0L
-        val debtorCustomers = mutableListOf<Pair<PartyEntity, Long>>()
-        val creditorSuppliers = mutableListOf<Pair<PartyEntity, Long>>()
+        val debtors = mutableListOf<Pair<PartyEntity, Long>>()
+        val suppliers = mutableListOf<Pair<PartyEntity, Long>>()
 
         parties.forEach { party ->
-            val bal = PartyCurrencyBalance.calculateFromTransactions(
+            val balance = PartyCurrencyBalance.calculateFromTransactions(
                 currencyCode,
                 decimals,
-                txByParty[party.id].orEmpty()
+                byParty[party.id].orEmpty()
             )
             val type = PartyType.from(party.partyType)
             if (type == PartyType.CUSTOMER || type == PartyType.BOTH) {
-                if (bal.customerBalance > 0L) {
-                    totalReceivable = Math.addExact(totalReceivable, bal.customerBalance)
-                    debtorCustomers += party to bal.customerBalance
-                } else if (bal.customerBalance < 0L) {
-                    customerCredits = Math.addExact(customerCredits, -bal.customerBalance)
+                when {
+                    balance.customerBalance > 0L -> {
+                        receivable = Math.addExact(receivable, balance.customerBalance)
+                        debtors += party to balance.customerBalance
+                    }
+                    balance.customerBalance < 0L -> {
+                        customerCredits = Math.addExact(customerCredits, -balance.customerBalance)
+                    }
                 }
             }
             if (type == PartyType.SUPPLIER || type == PartyType.BOTH) {
-                if (bal.supplierBalance > 0L) {
-                    totalPayable = Math.addExact(totalPayable, bal.supplierBalance)
-                    creditorSuppliers += party to bal.supplierBalance
-                } else if (bal.supplierBalance < 0L) {
-                    supplierAdvances = Math.addExact(supplierAdvances, -bal.supplierBalance)
+                when {
+                    balance.supplierBalance > 0L -> {
+                        payable = Math.addExact(payable, balance.supplierBalance)
+                        suppliers += party to balance.supplierBalance
+                    }
+                    balance.supplierBalance < 0L -> {
+                        supplierAdvances = Math.addExact(supplierAdvances, -balance.supplierBalance)
+                    }
                 }
             }
         }
 
+        val periodTx = transactions.filter {
+            it.currencyCode == currencyCode && it.occurredAt in fromTimestamp..toTimestamp
+        }
         var customerDebts = 0L
         var customerPayments = 0L
         var supplierDebts = 0L
         var supplierPayments = 0L
-        val periodTx = txs.filter {
-            it.currencyCode == currencyCode && it.occurredAt in fromTimestamp..toTimestamp
-        }
         periodTx.forEach { tx ->
             when (TransactionType.from(tx.transactionType)) {
                 TransactionType.CUSTOMER_DEBT,
@@ -364,16 +387,16 @@ class DeynBookV12Repository(private val database: AppDatabase) {
         return TransactionReportSummary(
             currencyCode = currencyCode,
             decimalPlaces = decimals,
-            totalCustomerReceivableBalance = totalReceivable,
-            totalSupplierPayableBalance = totalPayable,
+            totalCustomerReceivableBalance = receivable,
+            totalSupplierPayableBalance = payable,
             newCustomerDebtsInPeriod = customerDebts,
             customerPaymentsInPeriod = customerPayments,
             newSupplierDebtsInPeriod = supplierDebts,
             supplierPaymentsInPeriod = supplierPayments,
             totalCustomerCredits = customerCredits,
             totalSupplierAdvances = supplierAdvances,
-            topDebtorCustomers = debtorCustomers.sortedByDescending { it.second }.take(5),
-            topCreditorSuppliers = creditorSuppliers.sortedByDescending { it.second }.take(5),
+            topDebtorCustomers = debtors.sortedByDescending { it.second }.take(5),
+            topCreditorSuppliers = suppliers.sortedByDescending { it.second }.take(5),
             totalTransactionCount = periodTx.size
         )
     }
@@ -409,5 +432,7 @@ class DeynBookV12Repository(private val database: AppDatabase) {
         return attachment
     }
 
-    suspend fun deleteAttachment(id: String) = attachmentDao.deleteById(id)
+    suspend fun deleteAttachment(id: String) {
+        attachmentDao.deleteById(id)
+    }
 }
