@@ -16,6 +16,12 @@ interface PartyDao {
     @Query("SELECT * FROM parties ORDER BY name COLLATE NOCASE ASC")
     fun getAllPartiesFlow(): Flow<List<PartyEntity>>
 
+    @Query("SELECT * FROM parties WHERE ledgerId = :ledgerId AND isArchived = 0 ORDER BY name COLLATE NOCASE ASC")
+    fun getActivePartiesForLedgerFlow(ledgerId: String): Flow<List<PartyEntity>>
+
+    @Query("SELECT * FROM parties WHERE ledgerId = :ledgerId ORDER BY name COLLATE NOCASE ASC")
+    fun getAllPartiesForLedgerFlow(ledgerId: String): Flow<List<PartyEntity>>
+
     @Query("SELECT * FROM parties WHERE id = :id LIMIT 1")
     fun getPartyFlowById(id: String): Flow<PartyEntity?>
 
@@ -25,8 +31,22 @@ interface PartyDao {
     @Query("SELECT * FROM parties")
     suspend fun getAllParties(): List<PartyEntity>
 
+    @Query("SELECT * FROM parties WHERE ledgerId = :ledgerId")
+    suspend fun getAllPartiesForLedger(ledgerId: String): List<PartyEntity>
+
+    @Query("SELECT COUNT(*) FROM parties WHERE ledgerId = :ledgerId")
+    suspend fun countForLedger(ledgerId: String): Int
+
     @Query("SELECT * FROM parties WHERE normalizedName LIKE '%' || :query || '%' OR phone LIKE '%' || :query || '%'")
     suspend fun searchParties(query: String): List<PartyEntity>
+
+    @Query(
+        "SELECT * FROM parties WHERE ledgerId = :ledgerId AND (" +
+            "normalizedName LIKE '%' || :query || '%' OR " +
+            "phone LIKE '%' || :query || '%' OR " +
+            "LOWER(COALESCE(notes, '')) LIKE '%' || LOWER(:query) || '%')"
+    )
+    suspend fun searchPartiesInLedger(ledgerId: String, query: String): List<PartyEntity>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertParty(party: PartyEntity)
@@ -42,6 +62,9 @@ interface PartyDao {
 
     @Query("DELETE FROM parties WHERE id = :id")
     suspend fun deleteParty(id: String)
+
+    @Query("DELETE FROM parties WHERE ledgerId = :ledgerId")
+    suspend fun deletePartiesForLedger(ledgerId: String)
 
     @Query("DELETE FROM parties")
     suspend fun clearParties()
