@@ -1,56 +1,61 @@
 package com.example.ui.parties
 
-import androidx.compose.foundation.background
+import android.app.DatePickerDialog
+import java.util.Calendar
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.CalendarToday
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExposedDropdownMenuBox
+import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.MenuAnchorType
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.example.core.formatting.AmountFormatter
+import com.example.core.formatting.DateFormatter
 import com.example.core.localization.LocalStrings
 import com.example.data.local.entities.CurrencyEntity
 import com.example.data.local.entities.PartyEntity
 import com.example.data.models.PartyType
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AddEditPartyDialog(
     initialParty: PartyEntity? = null,
@@ -66,143 +71,120 @@ fun AddEditPartyDialog(
         openingType: String,
         openingAmountMinor: Long,
         currencyCode: String,
-        currencyDecimalPlaces: Int
+        currencyDecimalPlaces: Int,
+        openingOccurredAt: Long
     ) -> Unit
 ) {
     val strings = LocalStrings.current
+    val context = LocalContext.current
 
-    var name by remember { mutableStateOf(initialParty?.name ?: "") }
-    var phone by remember { mutableStateOf(initialParty?.phone ?: "") }
-    var partyType by remember {
-        mutableStateOf(
-            if (initialParty != null) PartyType.from(initialParty.partyType) else PartyType.CUSTOMER
-        )
-    }
-    var notes by remember { mutableStateOf(initialParty?.notes ?: "") }
+    var name by remember { mutableStateOf(initialParty?.name.orEmpty()) }
+    var phone by remember { mutableStateOf(initialParty?.phone.orEmpty()) }
+    var notes by remember { mutableStateOf(initialParty?.notes.orEmpty()) }
+    var partyType by remember { mutableStateOf(initialParty?.let { PartyType.from(it.partyType) } ?: PartyType.CUSTOMER) }
 
-    // Opening Balance state (only for new party)
-    var openingType by remember { mutableStateOf("NONE") } // "NONE", "HE_OWES_ME", "I_OWE_HIM"
+    var openingType by remember { mutableStateOf("NONE") }
     var openingAmountInput by remember { mutableStateOf("") }
     var selectedCurrencyCode by remember { mutableStateOf(defaultCurrencyCode) }
+    var openingOccurredAt by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    var currencyMenuExpanded by remember { mutableStateOf(false) }
 
     var nameError by remember { mutableStateOf(false) }
+    var openingAmountError by remember { mutableStateOf(false) }
     var similarParties by remember { mutableStateOf<List<PartyEntity>>(emptyList()) }
+    var isSaving by remember { mutableStateOf(false) }
 
     val activeCurrency = currencies.find { it.code == selectedCurrencyCode }
         ?: CurrencyEntity(code = selectedCurrencyCode, name = selectedCurrencyCode, decimalPlaces = 0)
 
-    // Check for similar names on input change
     LaunchedEffect(name) {
         if (initialParty == null && name.trim().length >= 3) {
-            val results = onSearchSimilar(name)
-            similarParties = results.filter { it.name.trim().lowercase() != name.trim().lowercase() }
+            similarParties = onSearchSimilar(name).filterNot {
+                it.name.trim().equals(name.trim(), ignoreCase = true)
+            }
         } else {
             similarParties = emptyList()
         }
     }
 
+    LaunchedEffect(partyType) {
+        val valid = when (openingType) {
+            "HE_OWES_ME" -> partyType == PartyType.CUSTOMER || partyType == PartyType.BOTH
+            "I_OWE_HIM" -> partyType == PartyType.SUPPLIER || partyType == PartyType.BOTH
+            else -> true
+        }
+        if (!valid) {
+            openingType = "NONE"
+            openingAmountInput = ""
+        }
+    }
+
+    fun pickOpeningDate() {
+        val cal = Calendar.getInstance().apply { timeInMillis = openingOccurredAt }
+        DatePickerDialog(
+            context,
+            { _, year, month, day ->
+                val updated = Calendar.getInstance().apply {
+                    timeInMillis = openingOccurredAt
+                    set(Calendar.YEAR, year)
+                    set(Calendar.MONTH, month)
+                    set(Calendar.DAY_OF_MONTH, day)
+                }
+                openingOccurredAt = updated.timeInMillis
+            },
+            cal.get(Calendar.YEAR),
+            cal.get(Calendar.MONTH),
+            cal.get(Calendar.DAY_OF_MONTH)
+        ).show()
+    }
+
     AlertDialog(
         onDismissRequest = onDismiss,
-        shape = RoundedCornerShape(20.dp),
-        title = {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(
-                    imageVector = Icons.Default.Person,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    text = if (initialParty == null) strings.addParty else strings.editParty,
-                    style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold)
-                )
-            }
-        },
+        title = { Text(if (initialParty == null) strings.addParty else strings.editParty, fontWeight = FontWeight.Bold) },
         text = {
             Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .verticalScroll(rememberScrollState())
+                modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                // Name Field
                 OutlinedTextField(
                     value = name,
                     onValueChange = {
                         name = it
-                        if (it.isNotBlank()) nameError = false
+                        nameError = false
                     },
-                    label = { Text(strings.partyNameLabel + " *") },
+                    label = { Text(strings.partyNameLabel) },
                     isError = nameError,
-                    supportingText = if (nameError) {
-                        { Text(strings.errorNameRequired, color = MaterialTheme.colorScheme.error) }
-                    } else null,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .testTag("party_name_input"),
-                    shape = RoundedCornerShape(12.dp),
+                    supportingText = if (nameError) ({ Text(strings.errorNameRequired) }) else null,
                     singleLine = true,
-                    keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Words)
+                    modifier = Modifier.fillMaxWidth().testTag("party_name_input")
                 )
 
-                // Similar Name Warning (Non-blocking)
                 if (similarParties.isNotEmpty()) {
-                    Spacer(modifier = Modifier.height(8.dp))
                     Surface(
-                        color = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.5f),
+                        color = MaterialTheme.colorScheme.tertiaryContainer,
                         shape = RoundedCornerShape(10.dp)
                     ) {
                         Column(modifier = Modifier.padding(10.dp)) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(
-                                    imageVector = Icons.Default.Warning,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.tertiary,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text(
-                                    text = strings.similarNameWarning,
-                                    style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold),
-                                    color = MaterialTheme.colorScheme.onTertiaryContainer
-                                )
+                                Icon(Icons.Default.Warning, contentDescription = null)
+                                Text(strings.similarNameWarning, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 6.dp))
                             }
-                            Text(
-                                text = similarParties.take(3).joinToString(", ") { it.name },
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onTertiaryContainer
-                            )
+                            Text(similarParties.take(3).joinToString(", ") { it.name })
                         }
                     }
                 }
 
-                Spacer(modifier = Modifier.height(12.dp))
-
-                // Phone Field
                 OutlinedTextField(
                     value = phone,
                     onValueChange = { phone = it },
                     label = { Text(strings.partyPhoneLabel) },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .testTag("party_phone_input"),
-                    shape = RoundedCornerShape(12.dp),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
                     singleLine = true,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone)
+                    modifier = Modifier.fillMaxWidth().testTag("party_phone_input")
                 )
 
-                Spacer(modifier = Modifier.height(14.dp))
-
-                // Party Type Selection
-                Text(
-                    text = strings.partyTypeLabel,
-                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
-                    color = MaterialTheme.colorScheme.onSurface
-                )
-                Spacer(modifier = Modifier.height(6.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
+                Text(strings.partyTypeLabel, fontWeight = FontWeight.SemiBold)
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     FilterChip(
                         selected = partyType == PartyType.CUSTOMER,
                         onClick = { partyType = PartyType.CUSTOMER },
@@ -223,98 +205,97 @@ fun AddEditPartyDialog(
                     )
                 }
 
-                Spacer(modifier = Modifier.height(12.dp))
-
-                // Notes Field
                 OutlinedTextField(
                     value = notes,
                     onValueChange = { notes = it },
                     label = { Text(strings.notesLabel) },
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp),
-                    maxLines = 2
+                    maxLines = 3,
+                    modifier = Modifier.fillMaxWidth()
                 )
 
-                // Opening Balance Section (Only on create)
                 if (initialParty == null) {
-                    Spacer(modifier = Modifier.height(16.dp))
-                    Surface(
-                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier.fillMaxWidth()
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f))
                     ) {
-                        Column(modifier = Modifier.padding(12.dp)) {
-                            Text(
-                                text = strings.openingBalanceTitle,
-                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text(strings.openingBalanceTitle, fontWeight = FontWeight.Bold)
+                            FilterChip(
+                                selected = openingType == "NONE",
+                                onClick = { openingType = "NONE" },
+                                label = { Text(strings.openingBalanceNone) }
                             )
-                            Spacer(modifier = Modifier.height(8.dp))
-
-                            // Radio Options
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clickable { openingType = "NONE" }
-                            ) {
-                                RadioButton(
-                                    selected = openingType == "NONE",
-                                    onClick = { openingType = "NONE" }
-                                )
-                                Text(strings.openingBalanceNone, style = MaterialTheme.typography.bodyMedium)
-                            }
-
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clickable { openingType = "HE_OWES_ME" }
-                            ) {
-                                RadioButton(
+                            if (partyType == PartyType.CUSTOMER || partyType == PartyType.BOTH) {
+                                FilterChip(
                                     selected = openingType == "HE_OWES_ME",
-                                    onClick = { openingType = "HE_OWES_ME" }
+                                    onClick = { openingType = "HE_OWES_ME" },
+                                    label = { Text(strings.openingBalanceHeOwesMe) }
                                 )
-                                Text(strings.openingBalanceHeOwesMe, style = MaterialTheme.typography.bodyMedium)
                             }
-
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clickable { openingType = "I_OWE_HIM" }
-                            ) {
-                                RadioButton(
+                            if (partyType == PartyType.SUPPLIER || partyType == PartyType.BOTH) {
+                                FilterChip(
                                     selected = openingType == "I_OWE_HIM",
-                                    onClick = { openingType = "I_OWE_HIM" }
+                                    onClick = { openingType = "I_OWE_HIM" },
+                                    label = { Text(strings.openingBalanceIOweHim) }
                                 )
-                                Text(strings.openingBalanceIOweHim, style = MaterialTheme.typography.bodyMedium)
                             }
 
                             if (openingType != "NONE") {
-                                Spacer(modifier = Modifier.height(8.dp))
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
+                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                     OutlinedTextField(
                                         value = openingAmountInput,
-                                        onValueChange = { openingAmountInput = it },
+                                        onValueChange = {
+                                            openingAmountInput = it
+                                            openingAmountError = false
+                                        },
                                         label = { Text(strings.amountLabel) },
-                                        modifier = Modifier.weight(1f),
-                                        shape = RoundedCornerShape(10.dp),
+                                        isError = openingAmountError,
                                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                                        singleLine = true
+                                        singleLine = true,
+                                        modifier = Modifier.weight(1.5f)
                                     )
 
-                                    // Currency selector chips
-                                    Box(modifier = Modifier.align(Alignment.CenterVertically)) {
-                                        Text(
-                                            text = selectedCurrencyCode,
-                                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                                            color = MaterialTheme.colorScheme.primary,
-                                            modifier = Modifier.padding(horizontal = 8.dp)
+                                    ExposedDropdownMenuBox(
+                                        expanded = currencyMenuExpanded,
+                                        onExpandedChange = { currencyMenuExpanded = it },
+                                        modifier = Modifier.weight(1f)
+                                    ) {
+                                        OutlinedTextField(
+                                            value = selectedCurrencyCode,
+                                            onValueChange = {},
+                                            readOnly = true,
+                                            label = { Text(strings.currencyLabel) },
+                                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(currencyMenuExpanded) },
+                                            modifier = Modifier.fillMaxWidth().menuAnchor(MenuAnchorType.PrimaryNotEditable)
                                         )
+                                        ExposedDropdownMenu(
+                                            expanded = currencyMenuExpanded,
+                                            onDismissRequest = { currencyMenuExpanded = false }
+                                        ) {
+                                            currencies.filter { it.isEnabled }.forEach { currency ->
+                                                DropdownMenuItem(
+                                                    text = { Text(currency.code) },
+                                                    onClick = {
+                                                        selectedCurrencyCode = currency.code
+                                                        openingAmountInput = ""
+                                                        openingAmountError = false
+                                                        currencyMenuExpanded = false
+                                                    }
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+
+                                Card(
+                                    modifier = Modifier.fillMaxWidth().clickable { pickOpeningDate() },
+                                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                                ) {
+                                    Row(modifier = Modifier.padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(Icons.Default.CalendarToday, contentDescription = null)
+                                        Text(DateFormatter.formatDate(openingOccurredAt), modifier = Modifier.padding(start = 8.dp))
                                     }
                                 }
                             }
@@ -325,36 +306,37 @@ fun AddEditPartyDialog(
         },
         confirmButton = {
             Button(
+                enabled = !isSaving,
+                modifier = Modifier.testTag("save_party_button"),
                 onClick = {
                     if (name.trim().isBlank()) {
                         nameError = true
-                    } else {
-                        val minor = if (openingType != "NONE") {
-                            AmountFormatter.parseToMinorUnits(openingAmountInput, activeCurrency.decimalPlaces) ?: 0L
-                        } else 0L
-
-                        onSave(
-                            name.trim(),
-                            phone.trim().takeIf { it.isNotBlank() },
-                            partyType,
-                            notes.trim().takeIf { it.isNotBlank() },
-                            openingType,
-                            minor,
-                            selectedCurrencyCode,
-                            activeCurrency.decimalPlaces
-                        )
+                        return@Button
                     }
-                },
-                shape = RoundedCornerShape(10.dp),
-                modifier = Modifier.testTag("save_party_button")
-            ) {
-                Text(strings.save)
-            }
+                    val openingAmount = if (openingType == "NONE") {
+                        0L
+                    } else {
+                        AmountFormatter.parseToMinorUnits(openingAmountInput, activeCurrency.decimalPlaces) ?: 0L
+                    }
+                    if (openingType != "NONE" && openingAmount <= 0L) {
+                        openingAmountError = true
+                        return@Button
+                    }
+                    isSaving = true
+                    onSave(
+                        name.trim(),
+                        phone.trim().takeIf { it.isNotBlank() },
+                        partyType,
+                        notes.trim().takeIf { it.isNotBlank() },
+                        openingType,
+                        openingAmount,
+                        selectedCurrencyCode,
+                        activeCurrency.decimalPlaces,
+                        openingOccurredAt
+                    )
+                }
+            ) { Text(strings.save) }
         },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text(strings.cancel)
-            }
-        }
+        dismissButton = { TextButton(onClick = onDismiss) { Text(strings.cancel) } }
     )
 }
