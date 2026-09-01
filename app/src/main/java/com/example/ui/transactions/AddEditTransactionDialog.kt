@@ -2,16 +2,16 @@ package com.example.ui.transactions
 
 import android.app.DatePickerDialog
 import android.app.TimePickerDialog
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import java.util.Calendar
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -19,7 +19,9 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.CalendarToday
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
@@ -56,6 +58,8 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.example.core.formatting.AmountFormatter
 import com.example.core.formatting.DateFormatter
+import com.example.core.localization.FeatureStringsProvider
+import com.example.core.localization.LocalLanguage
 import com.example.core.localization.LocalStrings
 import com.example.data.local.entities.CurrencyEntity
 import com.example.data.local.entities.LedgerTransactionEntity
@@ -81,10 +85,14 @@ fun AddEditTransactionDialog(
         currencyCode: String,
         currencyDecimalPlaces: Int,
         occurredAt: Long,
-        note: String?
+        note: String?,
+        dueAt: Long?,
+        attachmentUri: Uri?,
+        removeAttachment: Boolean
     ) -> Unit
 ) {
     val strings = LocalStrings.current
+    val featureStrings = FeatureStringsProvider.get(LocalLanguage.current)
     val context = LocalContext.current
     val amountFocusRequester = remember { FocusRequester() }
 
@@ -102,6 +110,16 @@ fun AddEditTransactionDialog(
     }
     var note by remember { mutableStateOf(initialTransaction?.note.orEmpty()) }
     var occurredAt by remember { mutableLongStateOf(initialTransaction?.occurredAt ?: System.currentTimeMillis()) }
+    var dueAt by remember { mutableStateOf(initialTransaction?.dueAt) }
+    var attachmentUri by remember { mutableStateOf<Uri?>(null) }
+    var removeAttachment by remember { mutableStateOf(false) }
+
+    val attachmentPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
+        if (uri != null) {
+            attachmentUri = uri
+            removeAttachment = false
+        }
+    }
 
     var partyMenuExpanded by remember { mutableStateOf(false) }
     var currencyMenuExpanded by remember { mutableStateOf(false) }
@@ -111,6 +129,8 @@ fun AddEditTransactionDialog(
 
     val activeCurrency = currencies.find { it.code == selectedCurrencyCode }
         ?: CurrencyEntity(code = selectedCurrencyCode, name = selectedCurrencyCode, decimalPlaces = 0)
+
+    val isDebtType = selectedType == TransactionType.CUSTOMER_DEBT || selectedType == TransactionType.SUPPLIER_DEBT
 
     val filteredParties = remember(partiesWithBalances, selectedType) {
         partiesWithBalances.filter { item ->
@@ -169,6 +189,25 @@ fun AddEditTransactionDialog(
                     set(Calendar.DAY_OF_MONTH, day)
                 }
                 occurredAt = updated.timeInMillis
+            },
+            cal.get(Calendar.YEAR),
+            cal.get(Calendar.MONTH),
+            cal.get(Calendar.DAY_OF_MONTH)
+        ).show()
+    }
+
+    fun openDueDatePicker() {
+        val seed = dueAt ?: occurredAt
+        val cal = Calendar.getInstance().apply { timeInMillis = seed }
+        DatePickerDialog(
+            context,
+            { _, year, month, day ->
+                val updated = Calendar.getInstance().apply {
+                    clear()
+                    set(year, month, day, 23, 59, 59)
+                    set(Calendar.MILLISECOND, 999)
+                }
+                dueAt = updated.timeInMillis
             },
             cal.get(Calendar.YEAR),
             cal.get(Calendar.MONTH),
@@ -324,6 +363,67 @@ fun AddEditTransactionDialog(
                     }
                 }
 
+                if (isDebtType) {
+                    Card(
+                        modifier = Modifier.fillMaxWidth().clickable { openDueDatePicker() },
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(12.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Default.CalendarToday, contentDescription = null)
+                                Column(modifier = Modifier.padding(start = 8.dp)) {
+                                    Text(featureStrings.dueDate, fontWeight = FontWeight.SemiBold)
+                                    Text(
+                                        dueAt?.let(DateFormatter::formatDate) ?: featureStrings.noDueDate,
+                                        style = MaterialTheme.typography.bodySmall
+                                    )
+                                }
+                            }
+                            if (dueAt != null) {
+                                TextButton(onClick = { dueAt = null }) { Text(featureStrings.clearDueDate) }
+                            } else {
+                                Text(featureStrings.setDueDate, color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelMedium)
+                            }
+                        }
+                    }
+                }
+
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                ) {
+                    Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Button(
+                            onClick = { attachmentPicker.launch(arrayOf("image/*", "application/pdf")) },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Icon(Icons.Default.AttachFile, contentDescription = null)
+                            Text(
+                                if (initialTransaction?.attachmentPath != null || attachmentUri != null) featureStrings.replaceAttachment else featureStrings.attachDocument,
+                                modifier = Modifier.padding(start = 6.dp)
+                            )
+                        }
+                        if ((initialTransaction?.attachmentPath != null && !removeAttachment) || attachmentUri != null) {
+                            Text(featureStrings.attachmentAdded, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
+                            TextButton(
+                                onClick = {
+                                    attachmentUri = null
+                                    removeAttachment = true
+                                }
+                            ) {
+                                Icon(Icons.Default.Delete, contentDescription = null)
+                                Text(featureStrings.removeAttachment, modifier = Modifier.padding(start = 4.dp))
+                            }
+                        }
+                    }
+                }
+
                 OutlinedTextField(
                     value = note,
                     onValueChange = { note = it },
@@ -355,7 +455,10 @@ fun AddEditTransactionDialog(
                         selectedCurrencyCode,
                         activeCurrency.decimalPlaces,
                         occurredAt,
-                        note.trim().takeIf { it.isNotBlank() }
+                        note.trim().takeIf { it.isNotBlank() },
+                        if (isDebtType) dueAt else null,
+                        attachmentUri,
+                        removeAttachment
                     )
                 }
             ) { Text(strings.save) }
