@@ -16,13 +16,12 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowDownward
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.ArrowUpward
+import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.ReceiptLong
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Store
@@ -55,6 +54,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.core.formatting.AmountFormatter
 import com.example.core.formatting.DateFormatter
+import com.example.core.localization.FeatureStringsProvider
+import com.example.core.localization.LocalLanguage
 import com.example.core.localization.LocalStrings
 import com.example.data.local.entities.CurrencyEntity
 import com.example.data.local.entities.LedgerTransactionEntity
@@ -72,22 +73,23 @@ fun HomeScreen(
     currencies: List<CurrencyEntity>,
     summary: DashboardSummary,
     recentTransactions: List<TransactionWithParty>,
+    overdueCount: Int,
     onSelectCurrency: (String) -> Unit,
     onQuickAction: (TransactionType) -> Unit,
     onTransactionClick: (LedgerTransactionEntity) -> Unit,
     onNavigateToParties: () -> Unit,
+    onOpenCollectionCenter: () -> Unit,
     onSearchClick: () -> Unit
 ) {
     val strings = LocalStrings.current
+    val featureStrings = FeatureStringsProvider.get(LocalLanguage.current)
     var currencyMenuExpanded by remember { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
             TopAppBar(
                 title = {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
                         Box(
                             modifier = Modifier
                                 .size(40.dp)
@@ -112,17 +114,13 @@ fun HomeScreen(
                             )
                             Text(
                                 text = strings.appTagline.uppercase(),
-                                style = MaterialTheme.typography.labelSmall.copy(
-                                    fontSize = 9.sp,
-                                    letterSpacing = 0.6.sp
-                                ),
+                                style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp, letterSpacing = 0.6.sp),
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
                     }
                 },
                 actions = {
-                    // Currency Quick Switch Pill Badge
                     Box {
                         Surface(
                             modifier = Modifier
@@ -154,10 +152,7 @@ fun HomeScreen(
                             }
                         }
 
-                        DropdownMenu(
-                            expanded = currencyMenuExpanded,
-                            onDismissRequest = { currencyMenuExpanded = false }
-                        ) {
+                        DropdownMenu(expanded = currencyMenuExpanded, onDismissRequest = { currencyMenuExpanded = false }) {
                             currencies.filter { it.isEnabled }.forEach { cur ->
                                 DropdownMenuItem(
                                     text = {
@@ -175,7 +170,6 @@ fun HomeScreen(
                         }
                     }
 
-                    // Search Button
                     IconButton(onClick = onSearchClick) {
                         Icon(
                             imageVector = Icons.Default.Search,
@@ -184,9 +178,7 @@ fun HomeScreen(
                         )
                     }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.background
-                )
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background)
             )
         },
         containerColor = MaterialTheme.colorScheme.background
@@ -200,13 +192,7 @@ fun HomeScreen(
         ) {
             item {
                 Spacer(modifier = Modifier.height(2.dp))
-
-                // Two Big Summary Cards: "لي عند الناس" & "عليّ للناس"
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    // Receivables Card (لي عند الناس)
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     SummaryBalanceCard(
                         title = strings.receivableTitle,
                         amount = summary.totalReceivable,
@@ -218,8 +204,6 @@ fun HomeScreen(
                         modifier = Modifier.weight(1f),
                         testTag = "receivables_card"
                     )
-
-                    // Payables Card (عليّ للناس)
                     SummaryBalanceCard(
                         title = strings.payableTitle,
                         amount = summary.totalPayable,
@@ -235,21 +219,48 @@ fun HomeScreen(
             }
 
             item {
-                // Quick Action Section Title
+                Card(
+                    modifier = Modifier.fillMaxWidth().clickable(onClick = onOpenCollectionCenter),
+                    shape = RoundedCornerShape(20.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f)),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.25f))
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                            Icon(Icons.Default.NotificationsActive, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                            Column(modifier = Modifier.padding(start = 10.dp)) {
+                                Text(featureStrings.collectionCenter, fontWeight = FontWeight.Bold)
+                                Text(featureStrings.collectionSubtitle, style = MaterialTheme.typography.bodySmall, maxLines = 1)
+                            }
+                        }
+                        Surface(
+                            color = if (overdueCount > 0) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+                            shape = RoundedCornerShape(50)
+                        ) {
+                            Text(
+                                overdueCount.toString(),
+                                color = MaterialTheme.colorScheme.onPrimary,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                            )
+                        }
+                    }
+                }
+            }
+
+            item {
                 Text(
                     text = strings.addTransaction.uppercase(),
-                    style = MaterialTheme.typography.labelSmall.copy(
-                        fontWeight = FontWeight.Bold,
-                        letterSpacing = 0.8.sp
-                    ),
+                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, letterSpacing = 0.8.sp),
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Spacer(modifier = Modifier.height(8.dp))
 
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     QuickActionButton(
                         title = strings.quickActionCustomerDebt,
                         icon = Icons.Default.ArrowUpward,
@@ -290,7 +301,6 @@ fun HomeScreen(
             }
 
             item {
-                // Recent Transactions Header
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -303,11 +313,7 @@ fun HomeScreen(
                     )
                     if (recentTransactions.isNotEmpty()) {
                         TextButton(onClick = onNavigateToParties) {
-                            Text(
-                                strings.seeAll,
-                                style = MaterialTheme.typography.labelLarge,
-                                color = MaterialTheme.colorScheme.primary
-                            )
+                            Text(strings.seeAll, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
                         }
                     }
                 }
@@ -324,16 +330,11 @@ fun HomeScreen(
                 }
             } else {
                 items(recentTransactions, key = { it.transaction.id }) { item ->
-                    TransactionListItem(
-                        item = item,
-                        onClick = { onTransactionClick(item.transaction) }
-                    )
+                    TransactionListItem(item = item, onClick = { onTransactionClick(item.transaction) })
                 }
             }
 
-            item {
-                Spacer(modifier = Modifier.height(60.dp))
-            }
+            item { Spacer(modifier = Modifier.height(60.dp)) }
         }
     }
 }
@@ -359,31 +360,20 @@ private fun SummaryBalanceCard(
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
         border = BorderStroke(1.dp, accentColor.copy(alpha = 0.2f))
     ) {
-        Column(
-            modifier = Modifier.padding(18.dp)
-        ) {
+        Column(modifier = Modifier.padding(18.dp)) {
             Text(
                 text = title.uppercase(),
-                style = MaterialTheme.typography.labelSmall.copy(
-                    fontWeight = FontWeight.Bold,
-                    letterSpacing = 0.6.sp
-                ),
+                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, letterSpacing = 0.6.sp),
                 color = accentColor
             )
             Spacer(modifier = Modifier.height(10.dp))
             Text(
                 text = AmountFormatter.formatAmount(amount, decimalPlaces, currencyCode),
-                style = MaterialTheme.typography.headlineMedium.copy(
-                    fontWeight = FontWeight.SemiBold,
-                    fontSize = 19.sp
-                ),
+                style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.SemiBold, fontSize = 19.sp),
                 color = Color(0xFF1A1C1E)
             )
             Spacer(modifier = Modifier.height(8.dp))
-            Surface(
-                color = accentColor.copy(alpha = 0.12f),
-                shape = RoundedCornerShape(50)
-            ) {
+            Surface(color = accentColor.copy(alpha = 0.12f), shape = RoundedCornerShape(50)) {
                 Text(
                     text = countLabel,
                     style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
@@ -401,6 +391,7 @@ fun TransactionListItem(
     onClick: () -> Unit
 ) {
     val strings = LocalStrings.current
+    val featureStrings = FeatureStringsProvider.get(LocalLanguage.current)
     val tx = item.transaction
     val type = TransactionType.from(tx.transactionType)
     val isDebit = type.isPositiveImpact
@@ -424,30 +415,20 @@ fun TransactionListItem(
     }
 
     Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick),
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
         shape = RoundedCornerShape(20.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
     ) {
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp),
+            modifier = Modifier.fillMaxWidth().padding(16.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.weight(1f)
-            ) {
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
                 Box(
-                    modifier = Modifier
-                        .size(42.dp)
-                        .clip(RoundedCornerShape(14.dp))
-                        .background(badgeColor.copy(alpha = 0.12f)),
+                    modifier = Modifier.size(42.dp).clip(RoundedCornerShape(14.dp)).background(badgeColor.copy(alpha = 0.12f)),
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
@@ -470,6 +451,13 @@ fun TransactionListItem(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                    tx.dueAt?.let {
+                        Text(
+                            "${featureStrings.dueDate}: ${DateFormatter.formatDate(it)}",
+                            style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.sp),
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
                     tx.note?.let { n ->
                         Text(
                             text = n,
