@@ -3,9 +3,11 @@ package com.example.ui
 import android.app.Application
 import android.net.Uri
 import androidx.lifecycle.viewModelScope
+import com.example.core.localization.AppLanguage
 import com.example.data.models.PartyType
 import com.example.data.models.TransactionReportSummary
 import com.example.data.models.TransactionType
+import com.example.services.LocalizedCsvService
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
@@ -62,9 +64,31 @@ fun MainViewModel.exportBackupToUri(uri: Uri) {
     }
 }
 
-fun MainViewModel.exportCsvToUri(uri: Uri) {
+/**
+ * Exports every transaction inside the requested date range, regardless of account/currency,
+ * using the same language currently selected by the user. The resulting UTF-8 CSV opens
+ * correctly in Microsoft Excel and other spreadsheet applications.
+ */
+fun MainViewModel.exportCsvToUri(
+    uri: Uri,
+    language: AppLanguage,
+    fromTime: Long = Long.MIN_VALUE,
+    toTime: Long = Long.MAX_VALUE
+) {
     viewModelScope.launch {
-        val csv = repository.exportAllTransactionsToCsv()
+        val partyRows = repository.getAllPartiesWithBalancesFlow().first()
+        val parties = partyRows.map { it.party }
+        val transactions = partyRows.flatMap { item ->
+            repository.getTransactionsForPartyFlow(item.party.id).first()
+        }
+        val csv = LocalizedCsvService.generate(
+            transactions = transactions,
+            partiesById = parties.associateBy { it.id },
+            language = language,
+            fromTimestamp = fromTime,
+            toTimestamp = toTime
+        )
+
         withContext(Dispatchers.IO) {
             getApplication<Application>().contentResolver.openOutputStream(uri, "wt")?.use { stream ->
                 stream.writer(Charsets.UTF_8).buffered().use { writer ->

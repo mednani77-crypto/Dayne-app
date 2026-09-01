@@ -80,10 +80,18 @@ fun DeynBookApp(viewModel: MainViewModel = viewModel()) {
         uri?.let(viewModel::exportBackupToUri)
     }
 
+    var pendingCsvRange by remember { mutableStateOf(Long.MIN_VALUE to Long.MAX_VALUE) }
     val csvCreateLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.CreateDocument("text/csv")
     ) { uri ->
-        uri?.let(viewModel::exportCsvToUri)
+        uri?.let {
+            viewModel.exportCsvToUri(
+                uri = it,
+                language = currentLanguage,
+                fromTime = pendingCsvRange.first,
+                toTime = pendingCsvRange.second
+            )
+        }
     }
 
     fun requestBackupDestination() {
@@ -91,9 +99,14 @@ fun DeynBookApp(viewModel: MainViewModel = viewModel()) {
         backupCreateLauncher.launch("DeynBook_Backup_$date.deynbook.json")
     }
 
-    fun requestCsvDestination() {
-        val date = DateFormatter.formatForFileName(System.currentTimeMillis())
-        csvCreateLauncher.launch("DeynBook_Transactions_$date.csv")
+    fun requestCsvDestination(fromTime: Long, toTime: Long) {
+        pendingCsvRange = fromTime to toTime
+        val rangeLabel = if (fromTime == Long.MIN_VALUE && toTime == Long.MAX_VALUE) {
+            "all"
+        } else {
+            "${DateFormatter.formatForFileName(fromTime)}_to_${DateFormatter.formatForFileName(toTime)}"
+        }
+        csvCreateLauncher.launch("DeynBook_Transactions_$rangeLabel.csv")
     }
 
     var selectedTab by remember { mutableIntStateOf(0) }
@@ -158,7 +171,7 @@ fun DeynBookApp(viewModel: MainViewModel = viewModel()) {
                     }
                 },
                 floatingActionButton = {
-                    if (showMainNavigation) {
+                    if (showMainNavigation && selectedTab == 0) {
                         ExtendedFloatingActionButton(
                             onClick = {
                                 transactionToEdit = null
@@ -281,7 +294,7 @@ fun DeynBookApp(viewModel: MainViewModel = viewModel()) {
                                     onAddCustomCurrency = viewModel::addCustomCurrency,
                                     onExportBackup = ::requestBackupDestination,
                                     onImportBackupFile = viewModel::parseBackupFromUri,
-                                    onExportCsv = ::requestCsvDestination,
+                                    onExportCsv = { requestCsvDestination(Long.MIN_VALUE, Long.MAX_VALUE) },
                                     onResetAllData = viewModel::resetAllData
                                 )
                             }
