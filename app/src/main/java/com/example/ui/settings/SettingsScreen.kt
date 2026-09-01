@@ -4,10 +4,8 @@ import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -15,8 +13,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
@@ -24,6 +20,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CurrencyExchange
+import androidx.compose.material.icons.filled.DeleteForever
 import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.FileUpload
 import androidx.compose.material.icons.filled.Language
@@ -35,6 +32,7 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -43,7 +41,6 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -51,13 +48,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.example.core.formatting.DateFormatter
 import com.example.core.localization.AppLanguage
 import com.example.core.localization.LocalStrings
@@ -76,166 +71,93 @@ fun SettingsScreen(
     onAddCustomCurrency: (code: String, name: String, decimals: Int) -> Unit,
     onExportBackup: () -> Unit,
     onImportBackupFile: (Uri) -> Unit,
-    onExportCsv: () -> Unit
+    onExportCsv: () -> Unit,
+    onResetAllData: () -> Unit
 ) {
     val strings = LocalStrings.current
-    val context = LocalContext.current
 
-    var businessName by remember { mutableStateOf(settings.businessName) }
-    var businessPhone by remember { mutableStateOf(settings.businessPhone ?: "") }
-    var businessAddress by remember { mutableStateOf(settings.businessAddress ?: "") }
-
-    var showAddCurrencyDialog by remember { mutableStateOf(false) }
+    var showProfileDialog by remember { mutableStateOf(false) }
     var showLanguageDialog by remember { mutableStateOf(false) }
     var showThemeDialog by remember { mutableStateOf(false) }
-    var showProfileDialog by remember { mutableStateOf(false) }
+    var showDefaultCurrencyDialog by remember { mutableStateOf(false) }
+    var showAddCurrencyDialog by remember { mutableStateOf(false) }
+    var showPrivacyDialog by remember { mutableStateOf(false) }
+    var showDeleteAllDialog by remember { mutableStateOf(false) }
 
-    // File picker launcher for importing JSON backup
-    val backupPickerLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.GetContent()
-    ) { uri: Uri? ->
-        uri?.let { onImportBackupFile(it) }
+    val backupPickerLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
+        uri?.let(onImportBackupFile)
     }
 
     Scaffold(
-        topBar = {
-            TopAppBar(
-                title = {
-                    Text(
-                        text = strings.settingsTitle,
-                        style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold)
-                    )
-                },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background)
-            )
-        },
-        containerColor = MaterialTheme.colorScheme.background
+        topBar = { TopAppBar(title = { Text(strings.settingsTitle, fontWeight = FontWeight.Bold) }) }
     ) { paddingValues ->
         LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(paddingValues)
                 .padding(horizontal = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
+            verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
             item {
-                Spacer(modifier = Modifier.height(2.dp))
-
-                // Business Profile Card
-                SettingsSectionCard(
-                    title = strings.businessProfileTitle,
-                    icon = Icons.Default.Store
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { showProfileDialog = true }
-                            .padding(14.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Column {
-                            Text(
-                                text = if (settings.businessName.isNotBlank()) settings.businessName else strings.businessNamePlaceholder,
-                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
-                            )
-                            settings.businessPhone?.let {
-                                Text(text = it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            }
-                        }
-                        TextButton(onClick = { showProfileDialog = true }) {
-                            Text(strings.edit)
-                        }
-                    }
+                SettingsCard(strings.businessProfileTitle, Icons.Default.Store) {
+                    SettingsRow(
+                        title = settings.businessName.ifBlank { strings.businessNamePlaceholder },
+                        subtitle = settings.businessPhone ?: strings.businessAddressLabel,
+                        onClick = { showProfileDialog = true }
+                    )
                 }
             }
 
             item {
-                // Language & Appearance Card
-                SettingsSectionCard(
-                    title = strings.languageSettingTitle,
-                    icon = Icons.Default.Language
-                ) {
-                    // Language selection row
-                    SettingsClickableRow(
+                SettingsCard(strings.languageSettingTitle, Icons.Default.Language) {
+                    SettingsRow(
                         title = strings.languageSettingTitle,
                         subtitle = currentLanguage.nativeName,
                         onClick = { showLanguageDialog = true }
                     )
-
-                    // Theme selection row
-                    val themeLabel = when (settings.themeMode) {
-                        "DARK" -> strings.themeDark
-                        "LIGHT" -> strings.themeLight
-                        else -> strings.themeSystem
-                    }
-                    SettingsClickableRow(
+                    SettingsRow(
                         title = strings.themeTitle,
-                        subtitle = themeLabel,
+                        subtitle = when (settings.themeMode) {
+                            "DARK" -> strings.themeDark
+                            "LIGHT" -> strings.themeLight
+                            else -> strings.themeSystem
+                        },
                         onClick = { showThemeDialog = true }
                     )
                 }
             }
 
             item {
-                // Currencies Management Card
-                SettingsSectionCard(
-                    title = strings.currencySettingTitle,
-                    icon = Icons.Default.CurrencyExchange
-                ) {
-                    Column(modifier = Modifier.padding(14.dp)) {
-                        Text(
-                            text = strings.enabledCurrenciesLabel,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                SettingsCard(strings.currencySettingTitle, Icons.Default.CurrencyExchange) {
+                    Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        SettingsRow(
+                            title = strings.defaultCurrencyLabel,
+                            subtitle = settings.defaultCurrencyCode,
+                            onClick = { showDefaultCurrencyDialog = true },
+                            compact = true
                         )
-                        Spacer(modifier = Modifier.height(10.dp))
 
+                        Text(strings.enabledCurrenciesLabel, style = MaterialTheme.typography.labelMedium)
                         currencies.forEach { cur ->
                             Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(vertical = 4.dp),
+                                modifier = Modifier.fillMaxWidth(),
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.SpaceBetween
                             ) {
-                                Column {
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Text(cur.code, fontWeight = FontWeight.Bold)
-                                        if (cur.code == settings.defaultCurrencyCode) {
-                                            Text(
-                                                text = " (${strings.defaultCurrencyLabel})",
-                                                style = MaterialTheme.typography.labelSmall,
-                                                color = MaterialTheme.colorScheme.primary
-                                            )
-                                        }
-                                    }
-                                    Text(
-                                        text = "${cur.name} • ${cur.decimalPlaces} decimals",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(cur.code, fontWeight = FontWeight.Bold)
+                                    Text(cur.name, style = MaterialTheme.typography.bodySmall)
                                 }
-
                                 Switch(
                                     checked = cur.isEnabled,
-                                    onCheckedChange = { isChecked ->
-                                        onToggleCurrency(cur.code, isChecked)
-                                    },
-                                    enabled = cur.code != settings.defaultCurrencyCode // Prevent disabling default currency
+                                    enabled = cur.code != settings.defaultCurrencyCode,
+                                    onCheckedChange = { onToggleCurrency(cur.code, it) }
                                 )
                             }
                         }
 
-                        Spacer(modifier = Modifier.height(8.dp))
-
-                        Button(
-                            onClick = { showAddCurrencyDialog = true },
-                            shape = RoundedCornerShape(10.dp),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Icon(imageVector = Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(6.dp))
+                        Button(onClick = { showAddCurrencyDialog = true }, modifier = Modifier.fillMaxWidth()) {
+                            Icon(Icons.Default.Add, contentDescription = null)
                             Text(strings.addCustomCurrency)
                         }
                     }
@@ -243,73 +165,33 @@ fun SettingsScreen(
             }
 
             item {
-                // Backup & Restore Card
-                SettingsSectionCard(
-                    title = strings.backupAndRestoreTitle,
-                    icon = Icons.Default.Security
-                ) {
-                    Column(modifier = Modifier.padding(14.dp)) {
-                        Text(
-                            text = strings.backupShareDesc,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-
-                        if (settings.lastBackupAt != null) {
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Text(
-                                text = "${strings.lastBackupDate} ${DateFormatter.formatDateTime(settings.lastBackupAt)}",
-                                style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
-                                color = MaterialTheme.colorScheme.primary
-                            )
+                SettingsCard(strings.backupAndRestoreTitle, Icons.Default.Security) {
+                    Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(strings.backupShareDesc, style = MaterialTheme.typography.bodySmall)
+                        settings.lastBackupAt?.let {
+                            Text("${strings.lastBackupDate} ${DateFormatter.formatDateTime(it)}", style = MaterialTheme.typography.bodySmall)
                         }
-
-                        Spacer(modifier = Modifier.height(12.dp))
-
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             Button(
                                 onClick = onExportBackup,
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .testTag("export_backup_button"),
-                                shape = RoundedCornerShape(10.dp)
+                                modifier = Modifier.weight(1f).testTag("export_backup_button")
                             ) {
-                                Icon(imageVector = Icons.Default.FileUpload, contentDescription = null, modifier = Modifier.size(16.dp))
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text(strings.createBackup, fontSize = 12.sp)
+                                Icon(Icons.Default.FileUpload, contentDescription = null)
+                                Text(strings.createBackup)
                             }
-
                             Button(
-                                onClick = {
-                                    backupPickerLauncher.launch("application/json")
-                                },
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .testTag("import_backup_button"),
-                                shape = RoundedCornerShape(10.dp),
-                                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary)
+                                onClick = { backupPickerLauncher.launch("application/json") },
+                                modifier = Modifier.weight(1f).testTag("import_backup_button")
                             ) {
-                                Icon(imageVector = Icons.Default.FileDownload, contentDescription = null, modifier = Modifier.size(16.dp))
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text(strings.restoreBackup, fontSize = 12.sp)
+                                Icon(Icons.Default.FileDownload, contentDescription = null)
+                                Text(strings.restoreBackup)
                             }
                         }
-
-                        Spacer(modifier = Modifier.height(8.dp))
-
                         Button(
                             onClick = onExportCsv,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .testTag("export_all_csv_button"),
-                            shape = RoundedCornerShape(10.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.surfaceVariant, contentColor = MaterialTheme.colorScheme.onSurfaceVariant)
+                            modifier = Modifier.fillMaxWidth().testTag("export_all_csv_button")
                         ) {
-                            Icon(imageVector = Icons.Default.FileDownload, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
+                            Icon(Icons.Default.FileDownload, contentDescription = null)
                             Text(strings.exportCsv)
                         }
                     }
@@ -317,109 +199,80 @@ fun SettingsScreen(
             }
 
             item {
-                // About / Local Guarantee
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(16.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f))
-                ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(16.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Security,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(28.dp)
-                        )
-                        Spacer(modifier = Modifier.height(6.dp))
-                        Text(
-                            text = strings.privacyPolicyTitle,
-                            style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Spacer(modifier = Modifier.height(2.dp))
-                        Text(
-                            text = strings.appVersionLabel,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.outline
-                        )
+                SettingsCard(strings.privacyPolicyTitle, Icons.Default.Security) {
+                    SettingsRow(
+                        title = strings.privacyPolicyTitle,
+                        subtitle = strings.aboutAppTitle,
+                        onClick = { showPrivacyDialog = true }
+                    )
+                    Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp)) {
+                        Text(strings.appVersionLabel, fontWeight = FontWeight.SemiBold)
+                        Text("1.0.0", style = MaterialTheme.typography.bodySmall)
                     }
                 }
             }
 
             item {
-                Spacer(modifier = Modifier.height(60.dp))
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.5f)),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.25f))
+                ) {
+                    Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.DeleteForever, contentDescription = null, tint = MaterialTheme.colorScheme.error)
+                            Text(strings.dangerZoneTitle, color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.Bold)
+                        }
+                        Button(
+                            onClick = { showDeleteAllDialog = true },
+                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
+                            modifier = Modifier.fillMaxWidth()
+                        ) { Text(strings.deleteAllData) }
+                    }
+                }
             }
+
+            item { Spacer(Modifier.height(50.dp)) }
         }
     }
 
-    // Edit Business Profile Dialog
     if (showProfileDialog) {
+        var name by remember(settings.businessName) { mutableStateOf(settings.businessName) }
+        var phone by remember(settings.businessPhone) { mutableStateOf(settings.businessPhone ?: "") }
+        var address by remember(settings.businessAddress) { mutableStateOf(settings.businessAddress ?: "") }
         AlertDialog(
             onDismissRequest = { showProfileDialog = false },
             title = { Text(strings.businessProfileTitle, fontWeight = FontWeight.Bold) },
             text = {
-                Column {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text(strings.businessNameLabel) })
                     OutlinedTextField(
-                        value = businessName,
-                        onValueChange = { businessName = it },
-                        label = { Text(strings.businessNameLabel + " *") },
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(10.dp),
-                        singleLine = true
-                    )
-                    Spacer(modifier = Modifier.height(10.dp))
-                    OutlinedTextField(
-                        value = businessPhone,
-                        onValueChange = { businessPhone = it },
+                        value = phone,
+                        onValueChange = { phone = it },
                         label = { Text(strings.businessPhoneLabel) },
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(10.dp),
-                        singleLine = true,
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone)
                     )
-                    Spacer(modifier = Modifier.height(10.dp))
-                    OutlinedTextField(
-                        value = businessAddress,
-                        onValueChange = { businessAddress = it },
-                        label = { Text(strings.businessAddressLabel) },
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(10.dp),
-                        singleLine = true
-                    )
+                    OutlinedTextField(value = address, onValueChange = { address = it }, label = { Text(strings.businessAddressLabel) })
                 }
             },
             confirmButton = {
-                Button(
-                    onClick = {
-                        if (businessName.trim().isNotBlank()) {
-                            onUpdateSettings(
-                                settings.copy(
-                                    businessName = businessName.trim(),
-                                    businessPhone = businessPhone.trim().takeIf { it.isNotBlank() },
-                                    businessAddress = businessAddress.trim().takeIf { it.isNotBlank() }
-                                )
+                Button(onClick = {
+                    if (name.trim().isNotBlank()) {
+                        onUpdateSettings(
+                            settings.copy(
+                                businessName = name.trim(),
+                                businessPhone = phone.trim().takeIf { it.isNotEmpty() },
+                                businessAddress = address.trim().takeIf { it.isNotEmpty() }
                             )
-                            showProfileDialog = false
-                        }
+                        )
+                        showProfileDialog = false
                     }
-                ) {
-                    Text(strings.save)
-                }
+                }) { Text(strings.save) }
             },
-            dismissButton = {
-                TextButton(onClick = { showProfileDialog = false }) {
-                    Text(strings.cancel)
-                }
-            }
+            dismissButton = { TextButton(onClick = { showProfileDialog = false }) { Text(strings.cancel) } }
         )
     }
 
-    // Language Selection Dialog
     if (showLanguageDialog) {
         AlertDialog(
             onDismissRequest = { showLanguageDialog = false },
@@ -428,202 +281,185 @@ fun SettingsScreen(
                 Column {
                     AppLanguage.entries.forEach { lang ->
                         Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable {
-                                    onLanguageChange(lang)
-                                    showLanguageDialog = false
-                                }
-                                .padding(vertical = 10.dp),
-                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.fillMaxWidth().clickable {
+                                onLanguageChange(lang)
+                                showLanguageDialog = false
+                            }.padding(vertical = 10.dp),
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
                             Text(lang.nativeName, fontWeight = FontWeight.SemiBold)
-                            if (lang == currentLanguage) {
-                                Icon(imageVector = Icons.Default.Check, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-                            }
+                            if (lang == currentLanguage) Icon(Icons.Default.Check, contentDescription = null)
                         }
                     }
                 }
             },
-            confirmButton = {
-                TextButton(onClick = { showLanguageDialog = false }) {
-                    Text(strings.cancel)
-                }
-            }
+            confirmButton = { TextButton(onClick = { showLanguageDialog = false }) { Text(strings.cancel) } }
         )
     }
 
-    // Theme Selection Dialog
     if (showThemeDialog) {
         AlertDialog(
             onDismissRequest = { showThemeDialog = false },
-            title = { Text(strings.themeTitle, fontWeight = FontWeight.Bold) },
+            title = { Text(strings.themeTitle) },
             text = {
                 Column {
-                    val themes = listOf(
+                    listOf(
                         "SYSTEM" to strings.themeSystem,
                         "LIGHT" to strings.themeLight,
                         "DARK" to strings.themeDark
-                    )
-                    themes.forEach { (mode, title) ->
+                    ).forEach { (mode, label) ->
+                        FilterChip(
+                            selected = settings.themeMode == mode,
+                            onClick = {
+                                onUpdateSettings(settings.copy(themeMode = mode))
+                                showThemeDialog = false
+                            },
+                            label = { Text(label) }
+                        )
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { showThemeDialog = false }) { Text(strings.cancel) } }
+        )
+    }
+
+    if (showDefaultCurrencyDialog) {
+        AlertDialog(
+            onDismissRequest = { showDefaultCurrencyDialog = false },
+            title = { Text(strings.defaultCurrencyLabel) },
+            text = {
+                Column {
+                    currencies.filter { it.isEnabled }.forEach { cur ->
                         Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable {
-                                    onUpdateSettings(settings.copy(themeMode = mode))
-                                    showThemeDialog = false
-                                }
-                                .padding(vertical = 10.dp),
-                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.fillMaxWidth().clickable {
+                                onUpdateSettings(settings.copy(defaultCurrencyCode = cur.code))
+                                showDefaultCurrencyDialog = false
+                            }.padding(vertical = 10.dp),
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
-                            Text(title, fontWeight = FontWeight.SemiBold)
-                            if (settings.themeMode == mode) {
-                                Icon(imageVector = Icons.Default.Check, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-                            }
+                            Text("${cur.code} • ${cur.name}")
+                            if (cur.code == settings.defaultCurrencyCode) Icon(Icons.Default.Check, contentDescription = null)
                         }
                     }
                 }
             },
-            confirmButton = {
-                TextButton(onClick = { showThemeDialog = false }) {
-                    Text(strings.cancel)
-                }
-            }
+            confirmButton = { TextButton(onClick = { showDefaultCurrencyDialog = false }) { Text(strings.cancel) } }
         )
     }
 
-    // Add Custom Currency Dialog
     if (showAddCurrencyDialog) {
-        var customCode by remember { mutableStateOf("") }
-        var customName by remember { mutableStateOf("") }
-        var customDecimals by remember { mutableStateOf("0") }
-
+        var code by remember { mutableStateOf("") }
+        var name by remember { mutableStateOf("") }
+        var decimals by remember { mutableStateOf("0") }
         AlertDialog(
             onDismissRequest = { showAddCurrencyDialog = false },
-            title = { Text(strings.addCustomCurrency, fontWeight = FontWeight.Bold) },
+            title = { Text(strings.addCustomCurrency) },
             text = {
-                Column {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     OutlinedTextField(
-                        value = customCode,
-                        onValueChange = { customCode = it.uppercase().take(5) },
-                        label = { Text("Code (e.g. SOS, USD, EUR)") },
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(10.dp),
-                        singleLine = true
+                        value = code,
+                        onValueChange = { code = it.uppercase().filter(Char::isLetterOrDigit).take(5) },
+                        label = { Text(strings.currencyCodeLabel) }
                     )
-                    Spacer(modifier = Modifier.height(10.dp))
+                    OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text(strings.currencyNameLabel) })
                     OutlinedTextField(
-                        value = customName,
-                        onValueChange = { customName = it },
-                        label = { Text("Name (e.g. US Dollar)") },
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(10.dp),
-                        singleLine = true
-                    )
-                    Spacer(modifier = Modifier.height(10.dp))
-                    OutlinedTextField(
-                        value = customDecimals,
-                        onValueChange = { customDecimals = it.filter { ch -> ch.isDigit() }.take(1) },
-                        label = { Text("Decimals (0 - 3)") },
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(10.dp),
-                        singleLine = true,
+                        value = decimals,
+                        onValueChange = { decimals = it.filter(Char::isDigit).take(1) },
+                        label = { Text(strings.decimalPlacesLabel) },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
                     )
                 }
             },
             confirmButton = {
-                Button(
-                    onClick = {
-                        if (customCode.isNotBlank() && customName.isNotBlank()) {
-                            val decimals = customDecimals.toIntOrNull()?.coerceIn(0, 3) ?: 0
-                            onAddCustomCurrency(customCode.trim(), customName.trim(), decimals)
-                            showAddCurrencyDialog = false
-                        }
+                Button(onClick = {
+                    val parsed = decimals.toIntOrNull()
+                    if (code.isNotBlank() && name.isNotBlank() && parsed != null && parsed in 0..2) {
+                        onAddCustomCurrency(code, name, parsed)
+                        showAddCurrencyDialog = false
                     }
-                ) {
-                    Text(strings.save)
+                }) { Text(strings.save) }
+            },
+            dismissButton = { TextButton(onClick = { showAddCurrencyDialog = false }) { Text(strings.cancel) } }
+        )
+    }
+
+    if (showPrivacyDialog) {
+        AlertDialog(
+            onDismissRequest = { showPrivacyDialog = false },
+            title = { Text(strings.privacyPolicyTitle, fontWeight = FontWeight.Bold) },
+            text = { Text(privacyBody(currentLanguage)) },
+            confirmButton = { Button(onClick = { showPrivacyDialog = false }) { Text(strings.back) } }
+        )
+    }
+
+    if (showDeleteAllDialog) {
+        var confirmation by remember { mutableStateOf("") }
+        AlertDialog(
+            onDismissRequest = { showDeleteAllDialog = false },
+            title = { Text(strings.deleteAllDataConfirmTitle, color = MaterialTheme.colorScheme.error) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(strings.deleteAllDataConfirmMessage)
+                    Text(strings.typeDeleteToConfirm)
+                    OutlinedTextField(value = confirmation, onValueChange = { confirmation = it })
                 }
             },
-            dismissButton = {
-                TextButton(onClick = { showAddCurrencyDialog = false }) {
-                    Text(strings.cancel)
-                }
-            }
+            confirmButton = {
+                Button(
+                    enabled = confirmation.trim().equals(strings.deleteKeyword, ignoreCase = true),
+                    onClick = {
+                        onResetAllData()
+                        showDeleteAllDialog = false
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                ) { Text(strings.deleteAllData) }
+            },
+            dismissButton = { TextButton(onClick = { showDeleteAllDialog = false }) { Text(strings.cancel) } }
         )
     }
 }
 
 @Composable
-private fun SettingsSectionCard(
+private fun SettingsCard(
     title: String,
-    icon: ImageVector,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
     content: @Composable () -> Unit
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(20.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+        shape = RoundedCornerShape(18.dp),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
     ) {
-        Column {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 14.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(32.dp)
-                        .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.1f), RoundedCornerShape(8.dp)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = icon,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(18.dp)
-                    )
-                }
-                Spacer(modifier = Modifier.width(10.dp))
-                Text(
-                    text = title,
-                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
-                    color = MaterialTheme.colorScheme.onSurface
-                )
-            }
-            content()
+        Row(modifier = Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+            Text(title, modifier = Modifier.padding(start = 8.dp), fontWeight = FontWeight.Bold)
         }
+        content()
     }
 }
 
 @Composable
-private fun SettingsClickableRow(
+private fun SettingsRow(
     title: String,
     subtitle: String,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    compact: Boolean = false
 ) {
     Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick)
-            .padding(horizontal = 16.dp, vertical = 14.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = if (compact) 8.dp else 12.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        Text(
-            text = title,
-            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
-            color = MaterialTheme.colorScheme.onSurface
-        )
-        Text(
-            text = subtitle,
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
+        Text(title, modifier = Modifier.weight(1f))
+        Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
+}
+
+private fun privacyBody(language: AppLanguage): String = when (language) {
+    AppLanguage.ARABIC -> "يعمل DeynBook محليًا على جهازك. لا نرسل أسماء العملاء أو أرقام الهواتف أو المبالغ أو العمليات إلى خادم، ولا نستخدم التحليلات أو الإعلانات في الإصدار 1.0. النسخ الاحتياطية وملفات PDF لا تغادر جهازك إلا عندما تختار أنت مشاركتها. التطبيق أداة لتسجيل الديون وليس بنكًا ولا يقدم قروضًا أو تحويلات مالية."
+    AppLanguage.SOMALI -> "DeynBook wuxuu xogta ku hayaa qalabkaaga. Magacyada, lambarrada telefoonka, lacagaha iyo dhaqdhaqaaqyada looma diro server, mana isticmaalno xayeysiis ama analytics nooca 1.0. Backup iyo PDF waxay ka baxaan qalabka oo keliya marka adigu wadaagto. App-ku waa buug deyn, ma aha bangi mana bixiyo amaah ama xawaalad."
+    AppLanguage.AMHARIC -> "DeynBook መረጃዎን በመሣሪያዎ ላይ ብቻ ያስቀምጣል። ስሞች፣ ስልክ ቁጥሮች፣ መጠኖች እና ግብይቶች ወደ ሰርቨር አይላኩም። በ1.0 ማስታወቂያ ወይም analytics የለም። Backup እና PDF እርስዎ ሲያጋሩ ብቻ ከመሣሪያው ይወጣሉ። መተግበሪያው የዕዳ መዝገብ ነው፣ ባንክ አይደለም እና ብድር ወይም ገንዘብ ማስተላለፍ አያቀርብም።"
+    AppLanguage.FRENCH -> "DeynBook conserve les données localement sur votre appareil. Les noms, numéros de téléphone, montants et opérations ne sont envoyés à aucun serveur. La version 1.0 n'utilise ni publicité ni analytics. Les sauvegardes et PDF ne quittent l'appareil que lorsque vous choisissez de les partager. DeynBook est un registre de dettes, pas une banque, et ne fournit ni prêt ni transfert d'argent."
+    AppLanguage.ENGLISH -> "DeynBook stores data locally on your device. Names, phone numbers, amounts and transactions are not sent to a server. Version 1.0 uses no ads or analytics. Backups and PDFs leave the device only when you choose to share them. DeynBook is a debt-recording tool, not a bank, and it does not provide loans or money transfers."
 }
