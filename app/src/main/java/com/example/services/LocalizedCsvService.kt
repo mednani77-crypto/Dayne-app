@@ -86,7 +86,8 @@ object LocalizedCsvService {
 
     private fun localizedPartyType(value: String?, language: AppLanguage): String {
         val strings = AppStrings.get(language)
-        return when (value?.let(PartyType::from)) {
+        val partyType = value?.let { PartyType.from(it) }
+        return when (partyType) {
             PartyType.CUSTOMER -> strings.typeCustomer
             PartyType.SUPPLIER -> strings.typeSupplier
             PartyType.BOTH -> strings.typeBoth
