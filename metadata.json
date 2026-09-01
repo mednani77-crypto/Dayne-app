@@ -1,0 +1,6 @@
+{
+  "name": "DeynBook",
+  "description": "دفتر الديون - تطبيق محلي لإدارة ديون ودفعات العملاء والموردين بدون إنترنت",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

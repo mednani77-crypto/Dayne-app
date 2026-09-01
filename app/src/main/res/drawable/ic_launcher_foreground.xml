@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Center 66dp bounding box is roughly between x=21..87, y=21..87 -->
+    
+    <!-- Ledger Book Body Base -->
+    <path
+        android:fillColor="#E0F2F1"
+        android:pathData="M32,27 H72 A6,6 0 0,1 78,33 V77 A6,6 0 0,1 72,83 H32 A4,4 0 0,1 28,79 V31 A4,4 0 0,1 32,27 Z" />
+    
+    <!-- Spine of the Book -->
+    <path
+        android:fillColor="#004D40"
+        android:pathData="M28,31 C28,28.8 29.8,27 32,27 L35,27 L35,83 L32,83 C29.8,83 28,81.2 28,79 Z" />
+
+    <!-- Spine Accent line -->
+    <path
+        android:fillColor="#80CBC4"
+        android:pathData="M35,27 H37 V83 H35 Z" />
+
+    <!-- Ledger bookmark ribbon -->
+    <path
+        android:fillColor="#FF7043"
+        android:pathData="M64,27 V45 L59,41 L54,45 V27 Z" />
+
+    <!-- Horizontal ledger lines on page -->
+    <path
+        android:strokeColor="#80CBC4"
+        android:strokeWidth="2.5"
+        android:strokeLineCap="round"
+        android:pathData="M43,51 H70 M43,59 H70 M43,67 H60" />
+
+    <!-- Inward Arrow (Receivable / Green badge) -->
+    <path
+        android:fillColor="#00BFA5"
+        android:pathData="M66,66 L78,66 L78,60 L86,69 L78,78 L78,72 L66,72 Z" />
+
+    <!-- Outward Arrow (Payable / Orange badge) -->
+    <path
+        android:fillColor="#FF5722"
+        android:pathData="M40,39 L28,39 L28,33 L20,42 L28,51 L28,45 L40,45 Z" />
+</vector>
