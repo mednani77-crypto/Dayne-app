@@ -16,7 +16,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -47,12 +46,10 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SecondaryTabRow
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -61,12 +58,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.example.core.formatting.AmountFormatter
 import com.example.core.formatting.DateFormatter
 import com.example.core.localization.LocalStrings
@@ -74,8 +68,8 @@ import com.example.data.local.entities.LedgerTransactionEntity
 import com.example.data.models.PartyType
 import com.example.data.models.PartyWithBalances
 import com.example.data.models.TransactionType
+import com.example.services.StatementAccountType
 import com.example.ui.components.EmptyStateView
-import com.example.ui.components.QuickActionButton
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -87,9 +81,9 @@ fun PartyDetailScreen(
     onArchiveParty: (Boolean) -> Unit,
     onDeleteParty: () -> Unit,
     onCallParty: (String) -> Unit,
-    onShareStatementPdf: (currencyCode: String) -> Unit,
-    onShareImageCard: (currencyCode: String) -> Unit,
-    onShareTextSummary: (currencyCode: String) -> Unit,
+    onShareStatementPdf: (currencyCode: String, accountType: StatementAccountType) -> Unit,
+    onShareImageCard: (currencyCode: String, accountType: StatementAccountType) -> Unit,
+    onShareTextSummary: (currencyCode: String, accountType: StatementAccountType) -> Unit,
     onAddTransaction: (TransactionType) -> Unit,
     onEditTransaction: (LedgerTransactionEntity) -> Unit,
     onDeleteTransaction: (LedgerTransactionEntity) -> Unit
@@ -97,28 +91,28 @@ fun PartyDetailScreen(
     val strings = LocalStrings.current
     val party = partyWithBalances.party
     val partyType = PartyType.from(party.partyType)
+    val supportsCustomer = partyType == PartyType.CUSTOMER || partyType == PartyType.BOTH
+    val supportsSupplier = partyType == PartyType.SUPPLIER || partyType == PartyType.BOTH
 
-    var menuExpanded by remember { mutableStateOf(false) }
-    var shareMenuExpanded by remember { mutableStateOf(false) }
-    var selectedFilterIndex by remember { mutableIntStateOf(0) } // 0: All, 1: Debts, 2: Payments
-    var showDeleteConfirmDialog by remember { mutableStateOf(false) }
-    var transactionToDelete by remember { mutableStateOf<LedgerTransactionEntity?>(null) }
-
-    // Selected currency for actions & summaries
-    val availableCurrencies = partyWithBalances.balances.map { it.currencyCode }.ifEmpty { listOf("DJF") }
-    var selectedCurrencyCode by remember { mutableStateOf(availableCurrencies.first()) }
+    val availableCurrencies = partyWithBalances.balances.map { it.currencyCode }.distinct().ifEmpty { listOf("DJF") }
+    var selectedCurrencyCode by remember(availableCurrencies) { mutableStateOf(availableCurrencies.first()) }
     val currentBalance = partyWithBalances.getBalanceForCurrency(selectedCurrencyCode)
 
-    val filteredTransactions = remember(transactions, selectedFilterIndex, selectedCurrencyCode) {
+    var filterIndex by remember { mutableIntStateOf(0) }
+    var shareMenuExpanded by remember { mutableStateOf(false) }
+    var optionsExpanded by remember { mutableStateOf(false) }
+    var transactionToDelete by remember { mutableStateOf<LedgerTransactionEntity?>(null) }
+    var showDeletePartyDialog by remember { mutableStateOf(false) }
+
+    val filteredTransactions = remember(transactions, selectedCurrencyCode, filterIndex) {
         transactions.filter { tx ->
-            val matchCurrency = tx.currencyCode == selectedCurrencyCode
+            if (tx.currencyCode != selectedCurrencyCode) return@filter false
             val type = TransactionType.from(tx.transactionType)
-            val matchType = when (selectedFilterIndex) {
+            when (filterIndex) {
                 1 -> type.isPositiveImpact
                 2 -> !type.isPositiveImpact
                 else -> true
             }
-            matchCurrency && matchType
         }
     }
 
@@ -127,101 +121,92 @@ fun PartyDetailScreen(
             TopAppBar(
                 title = {
                     Column {
-                        Text(
-                            text = party.name,
-                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                            maxLines = 1
-                        )
+                        Text(party.name, fontWeight = FontWeight.Bold, maxLines = 1)
                         party.phone?.let {
-                            Text(
-                                text = it,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
+                            Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     }
                 },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(imageVector = Icons.AutoMirrored.Filled.ArrowBack, contentDescription = strings.back)
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = strings.back)
                     }
                 },
                 actions = {
-                    // Call Button if phone present
                     party.phone?.let { phone ->
                         IconButton(onClick = { onCallParty(phone) }) {
-                            Icon(
-                                imageVector = Icons.Default.Call,
-                                contentDescription = strings.callParty,
-                                tint = MaterialTheme.colorScheme.primary
-                            )
+                            Icon(Icons.Default.Call, contentDescription = strings.callParty)
                         }
                     }
 
-                    // Share Menu Action
                     Box {
                         IconButton(onClick = { shareMenuExpanded = true }) {
-                            Icon(
-                                imageVector = Icons.Default.Share,
-                                contentDescription = strings.shareStatement,
-                                tint = MaterialTheme.colorScheme.primary
-                            )
+                            Icon(Icons.Default.Share, contentDescription = strings.shareStatement)
                         }
-
                         DropdownMenu(
                             expanded = shareMenuExpanded,
                             onDismissRequest = { shareMenuExpanded = false }
                         ) {
-                            DropdownMenuItem(
-                                text = { Text(strings.exportPdfStatement) },
-                                leadingIcon = { Icon(Icons.Default.PictureAsPdf, contentDescription = null) },
-                                onClick = {
-                                    shareMenuExpanded = false
-                                    onShareStatementPdf(selectedCurrencyCode)
-                                }
-                            )
-                            DropdownMenuItem(
-                                text = { Text(strings.shareImageCard) },
-                                leadingIcon = { Icon(Icons.Default.ReceiptLong, contentDescription = null) },
-                                onClick = {
-                                    shareMenuExpanded = false
-                                    onShareImageCard(selectedCurrencyCode)
-                                }
-                            )
-                            DropdownMenuItem(
-                                text = { Text(strings.shareTextSummary) },
-                                leadingIcon = { Icon(Icons.Default.TextSnippet, contentDescription = null) },
-                                onClick = {
-                                    shareMenuExpanded = false
-                                    onShareTextSummary(selectedCurrencyCode)
-                                }
-                            )
+                            if (supportsCustomer) {
+                                ShareItems(
+                                    accountLabel = strings.typeCustomer,
+                                    onPdf = {
+                                        shareMenuExpanded = false
+                                        onShareStatementPdf(selectedCurrencyCode, StatementAccountType.CUSTOMER)
+                                    },
+                                    onImage = {
+                                        shareMenuExpanded = false
+                                        onShareImageCard(selectedCurrencyCode, StatementAccountType.CUSTOMER)
+                                    },
+                                    onText = {
+                                        shareMenuExpanded = false
+                                        onShareTextSummary(selectedCurrencyCode, StatementAccountType.CUSTOMER)
+                                    }
+                                )
+                            }
+                            if (supportsSupplier) {
+                                ShareItems(
+                                    accountLabel = strings.typeSupplier,
+                                    onPdf = {
+                                        shareMenuExpanded = false
+                                        onShareStatementPdf(selectedCurrencyCode, StatementAccountType.SUPPLIER)
+                                    },
+                                    onImage = {
+                                        shareMenuExpanded = false
+                                        onShareImageCard(selectedCurrencyCode, StatementAccountType.SUPPLIER)
+                                    },
+                                    onText = {
+                                        shareMenuExpanded = false
+                                        onShareTextSummary(selectedCurrencyCode, StatementAccountType.SUPPLIER)
+                                    }
+                                )
+                            }
                         }
                     }
 
-                    // Options Menu (Edit, Archive, Delete)
                     Box {
-                        IconButton(onClick = { menuExpanded = true }) {
-                            Icon(imageVector = Icons.Default.MoreVert, contentDescription = null)
+                        IconButton(onClick = { optionsExpanded = true }) {
+                            Icon(Icons.Default.MoreVert, contentDescription = null)
                         }
-
-                        DropdownMenu(
-                            expanded = menuExpanded,
-                            onDismissRequest = { menuExpanded = false }
-                        ) {
+                        DropdownMenu(expanded = optionsExpanded, onDismissRequest = { optionsExpanded = false }) {
                             DropdownMenuItem(
                                 text = { Text(strings.editParty) },
                                 leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null) },
                                 onClick = {
-                                    menuExpanded = false
+                                    optionsExpanded = false
                                     onEditParty()
                                 }
                             )
                             DropdownMenuItem(
                                 text = { Text(if (party.isArchived) strings.unarchiveParty else strings.archiveParty) },
-                                leadingIcon = { Icon(if (party.isArchived) Icons.Default.Unarchive else Icons.Default.Archive, contentDescription = null) },
+                                leadingIcon = {
+                                    Icon(
+                                        if (party.isArchived) Icons.Default.Unarchive else Icons.Default.Archive,
+                                        contentDescription = null
+                                    )
+                                },
                                 onClick = {
-                                    menuExpanded = false
+                                    optionsExpanded = false
                                     onArchiveParty(!party.isArchived)
                                 }
                             )
@@ -229,227 +214,114 @@ fun PartyDetailScreen(
                                 text = { Text(strings.deleteParty, color = MaterialTheme.colorScheme.error) },
                                 leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null, tint = MaterialTheme.colorScheme.error) },
                                 onClick = {
-                                    menuExpanded = false
-                                    if (partyWithBalances.transactionCount == 0) {
-                                        showDeleteConfirmDialog = true
-                                    } else {
-                                        // Can't delete if has transactions, show message
-                                        showDeleteConfirmDialog = true
-                                    }
+                                    optionsExpanded = false
+                                    showDeletePartyDialog = true
                                 }
                             )
                         }
                     }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background)
+                }
             )
-        },
-        containerColor = MaterialTheme.colorScheme.background
+        }
     ) { paddingValues ->
         LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(paddingValues)
                 .padding(horizontal = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp)
+            verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             item {
-                Spacer(modifier = Modifier.height(2.dp))
-
-                // Currency Selector row if multiple currencies
                 if (availableCurrencies.size > 1) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         availableCurrencies.forEach { code ->
                             FilterChip(
-                                selected = code == selectedCurrencyCode,
+                                selected = selectedCurrencyCode == code,
                                 onClick = { selectedCurrencyCode = code },
                                 label = { Text(code, fontWeight = FontWeight.Bold) }
                             )
                         }
                     }
-                    Spacer(modifier = Modifier.height(6.dp))
                 }
+            }
 
-                // Balance Details Card
+            item {
                 Card(
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(20.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                    elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+                    shape = RoundedCornerShape(18.dp),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
                 ) {
-                    Column(modifier = Modifier.padding(18.dp)) {
-                        val isCustomer = partyType == PartyType.CUSTOMER || partyType == PartyType.BOTH
-                        val isSupplier = partyType == PartyType.SUPPLIER || partyType == PartyType.BOTH
-
-                        if (isCustomer && currentBalance != null) {
-                            Text(
-                                text = "${strings.typeCustomer} • ${currentBalance.getCustomerStatusText(strings)}",
-                                style = MaterialTheme.typography.titleMedium.copy(
-                                    fontWeight = FontWeight.SemiBold,
-                                    fontSize = 17.sp
-                                ),
-                                color = if (currentBalance.customerBalance > 0) Color(0xFF196838) else Color(0xFF0061A4)
+                    Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        if (supportsCustomer) {
+                            AccountBalanceBlock(
+                                title = strings.typeCustomer,
+                                status = currentBalance?.getCustomerStatusText(strings) ?: strings.statusSettled,
+                                totalDebt = currentBalance?.customerTotalDebt ?: 0L,
+                                totalPaid = currentBalance?.customerTotalPaid ?: 0L,
+                                decimals = currentBalance?.decimalPlaces ?: 0,
+                                currencyCode = selectedCurrencyCode,
+                                debtColor = Color(0xFF196838)
                             )
-                            Spacer(modifier = Modifier.height(10.dp))
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween
-                            ) {
-                                Column {
-                                    Text(strings.totalDebtRecorded, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                    Text(
-                                        AmountFormatter.formatAmount(currentBalance.customerTotalDebt, currentBalance.decimalPlaces, selectedCurrencyCode),
-                                        fontWeight = FontWeight.SemiBold,
-                                        style = MaterialTheme.typography.bodyLarge,
-                                        color = Color(0xFF196838)
-                                    )
-                                }
-                                Column {
-                                    Text(strings.totalPaidRecorded, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                    Text(
-                                        AmountFormatter.formatAmount(currentBalance.customerTotalPaid, currentBalance.decimalPlaces, selectedCurrencyCode),
-                                        fontWeight = FontWeight.SemiBold,
-                                        style = MaterialTheme.typography.bodyLarge,
-                                        color = Color(0xFF0061A4)
-                                    )
-                                }
-                            }
                         }
-
-                        if (partyType == PartyType.BOTH && currentBalance != null) {
-                            Spacer(modifier = Modifier.height(12.dp))
-                        }
-
-                        if (isSupplier && currentBalance != null) {
-                            Text(
-                                text = "${strings.typeSupplier} • ${currentBalance.getSupplierStatusText(strings)}",
-                                style = MaterialTheme.typography.titleMedium.copy(
-                                    fontWeight = FontWeight.SemiBold,
-                                    fontSize = 17.sp
-                                ),
-                                color = if (currentBalance.supplierBalance > 0) Color(0xFFB3261E) else Color(0xFF0061A4)
+                        if (supportsSupplier) {
+                            AccountBalanceBlock(
+                                title = strings.typeSupplier,
+                                status = currentBalance?.getSupplierStatusText(strings) ?: strings.statusSettled,
+                                totalDebt = currentBalance?.supplierTotalDebt ?: 0L,
+                                totalPaid = currentBalance?.supplierTotalPaid ?: 0L,
+                                decimals = currentBalance?.decimalPlaces ?: 0,
+                                currencyCode = selectedCurrencyCode,
+                                debtColor = Color(0xFFB3261E)
                             )
-                            Spacer(modifier = Modifier.height(10.dp))
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween
-                            ) {
-                                Column {
-                                    Text(strings.totalDebtRecorded, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                    Text(
-                                        AmountFormatter.formatAmount(currentBalance.supplierTotalDebt, currentBalance.decimalPlaces, selectedCurrencyCode),
-                                        fontWeight = FontWeight.SemiBold,
-                                        style = MaterialTheme.typography.bodyLarge,
-                                        color = Color(0xFFB3261E)
-                                    )
-                                }
-                                Column {
-                                    Text(strings.totalPaidRecorded, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                    Text(
-                                        AmountFormatter.formatAmount(currentBalance.supplierTotalPaid, currentBalance.decimalPlaces, selectedCurrencyCode),
-                                        fontWeight = FontWeight.SemiBold,
-                                        style = MaterialTheme.typography.bodyLarge,
-                                        color = Color(0xFF0061A4)
-                                    )
-                                }
-                            }
                         }
                     }
                 }
             }
 
-            item {
-                // Quick Action Buttons based on Party Type
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    if (partyType == PartyType.CUSTOMER || partyType == PartyType.BOTH) {
-                        Button(
-                            onClick = { onAddTransaction(TransactionType.CUSTOMER_DEBT) },
-                            modifier = Modifier.weight(1f),
-                            shape = RoundedCornerShape(16.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF196838))
-                        ) {
-                            Icon(imageVector = Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text(strings.quickActionCustomerDebt, fontWeight = FontWeight.SemiBold)
-                        }
+            if (supportsCustomer) {
+                item {
+                    ActionRow(
+                        firstText = strings.quickActionCustomerDebt,
+                        secondText = strings.quickActionCustomerPayment,
+                        firstColor = Color(0xFF196838),
+                        secondColor = Color(0xFF0061A4),
+                        onFirst = { onAddTransaction(TransactionType.CUSTOMER_DEBT) },
+                        onSecond = { onAddTransaction(TransactionType.CUSTOMER_PAYMENT) }
+                    )
+                }
+            }
 
-                        Button(
-                            onClick = { onAddTransaction(TransactionType.CUSTOMER_PAYMENT) },
-                            modifier = Modifier.weight(1f),
-                            shape = RoundedCornerShape(16.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0061A4))
-                        ) {
-                            Icon(imageVector = Icons.Default.ArrowDownward, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text(strings.quickActionCustomerPayment, fontWeight = FontWeight.SemiBold)
-                        }
-                    } else {
-                        Button(
-                            onClick = { onAddTransaction(TransactionType.SUPPLIER_DEBT) },
-                            modifier = Modifier.weight(1f),
-                            shape = RoundedCornerShape(16.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFB3261E))
-                        ) {
-                            Icon(imageVector = Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text(strings.quickActionSupplierDebt, fontWeight = FontWeight.SemiBold)
-                        }
-
-                        Button(
-                            onClick = { onAddTransaction(TransactionType.SUPPLIER_PAYMENT) },
-                            modifier = Modifier.weight(1f),
-                            shape = RoundedCornerShape(16.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0061A4))
-                        ) {
-                            Icon(imageVector = Icons.Default.ArrowDownward, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text(strings.quickActionSupplierPayment, fontWeight = FontWeight.SemiBold)
-                        }
-                    }
+            if (supportsSupplier) {
+                item {
+                    ActionRow(
+                        firstText = strings.quickActionSupplierDebt,
+                        secondText = strings.quickActionSupplierPayment,
+                        firstColor = Color(0xFFB3261E),
+                        secondColor = Color(0xFF0061A4),
+                        onFirst = { onAddTransaction(TransactionType.SUPPLIER_DEBT) },
+                        onSecond = { onAddTransaction(TransactionType.SUPPLIER_PAYMENT) }
+                    )
                 }
             }
 
             item {
-                // Filter Tabs: All, Debts, Payments
-                SecondaryTabRow(
-                    selectedTabIndex = selectedFilterIndex,
-                    containerColor = MaterialTheme.colorScheme.background
-                ) {
-                    Tab(
-                        selected = selectedFilterIndex == 0,
-                        onClick = { selectedFilterIndex = 0 },
-                        text = { Text(strings.filterAll) }
-                    )
-                    Tab(
-                        selected = selectedFilterIndex == 1,
-                        onClick = { selectedFilterIndex = 1 },
-                        text = { Text(strings.filterDebts) }
-                    )
-                    Tab(
-                        selected = selectedFilterIndex == 2,
-                        onClick = { selectedFilterIndex = 2 },
-                        text = { Text(strings.filterPayments) }
-                    )
+                SecondaryTabRow(selectedTabIndex = filterIndex) {
+                    listOf(strings.filterAll, strings.filterDebts, strings.filterPayments).forEachIndexed { index, label ->
+                        Tab(
+                            selected = filterIndex == index,
+                            onClick = { filterIndex = index },
+                            text = { Text(label) }
+                        )
+                    }
                 }
             }
 
             if (filteredTransactions.isEmpty()) {
-                item {
-                    EmptyStateView(
-                        icon = Icons.Default.ReceiptLong,
-                        title = strings.noTransactionsYet
-                    )
-                }
+                item { EmptyStateView(icon = Icons.Default.ReceiptLong, title = strings.noTransactionsYet) }
             } else {
                 items(filteredTransactions, key = { it.id }) { tx ->
-                    PartyTransactionCard(
+                    TransactionCard(
                         transaction = tx,
                         onClick = { onEditTransaction(tx) },
                         onDelete = { transactionToDelete = tx }
@@ -457,81 +329,56 @@ fun PartyDetailScreen(
                 }
             }
 
-            item {
-                Spacer(modifier = Modifier.height(40.dp))
-            }
+            item { Spacer(Modifier.height(40.dp)) }
         }
     }
 
-    // Delete Transaction Confirmation Dialog
     transactionToDelete?.let { tx ->
         AlertDialog(
             onDismissRequest = { transactionToDelete = null },
             title = { Text(strings.confirmDeleteTxTitle, fontWeight = FontWeight.Bold) },
             text = {
-                Column {
-                    Text(strings.confirmDeleteTxMessage)
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text(
-                        "${AmountFormatter.formatAmount(tx.amountMinor, tx.currencyDecimalPlaces, tx.currencyCode)} - ${DateFormatter.formatDate(tx.occurredAt)}",
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.primary
-                    )
-                }
+                Text(
+                    "${strings.confirmDeleteTxMessage}\n${AmountFormatter.formatAmount(tx.amountMinor, tx.currencyDecimalPlaces, tx.currencyCode)}"
+                )
             },
             confirmButton = {
                 Button(
                     onClick = {
-                        val toDel = transactionToDelete
                         transactionToDelete = null
-                        if (toDel != null) onDeleteTransaction(toDel)
+                        onDeleteTransaction(tx)
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
-                ) {
-                    Text(strings.delete)
-                }
+                ) { Text(strings.delete) }
             },
             dismissButton = {
-                TextButton(onClick = { transactionToDelete = null }) {
-                    Text(strings.cancel)
-                }
+                TextButton(onClick = { transactionToDelete = null }) { Text(strings.cancel) }
             }
         )
     }
 
-    // Delete Party Confirmation Dialog
-    if (showDeleteConfirmDialog) {
-        val hasTx = partyWithBalances.transactionCount > 0
+    if (showDeletePartyDialog) {
+        val hasTransactions = partyWithBalances.transactionCount > 0
         AlertDialog(
-            onDismissRequest = { showDeleteConfirmDialog = false },
+            onDismissRequest = { showDeletePartyDialog = false },
             title = { Text(strings.deleteParty, fontWeight = FontWeight.Bold) },
-            text = {
-                Text(
-                    text = if (hasTx) strings.cannotDeletePartyWithTx else strings.deletePartyWarning
-                )
-            },
+            text = { Text(if (hasTransactions) strings.cannotDeletePartyWithTx else strings.deletePartyWarning) },
             confirmButton = {
-                if (!hasTx) {
+                if (hasTransactions) {
+                    Button(onClick = { showDeletePartyDialog = false }) { Text(strings.cancel) }
+                } else {
                     Button(
                         onClick = {
-                            showDeleteConfirmDialog = false
+                            showDeletePartyDialog = false
                             onDeleteParty()
                         },
                         colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
-                    ) {
-                        Text(strings.delete)
-                    }
-                } else {
-                    Button(onClick = { showDeleteConfirmDialog = false }) {
-                        Text("OK")
-                    }
+                    ) { Text(strings.delete) }
                 }
             },
             dismissButton = {
-                if (!hasTx) {
-                    TextButton(onClick = { showDeleteConfirmDialog = false }) {
-                        Text(strings.cancel)
-                    }
+                if (!hasTransactions) {
+                    TextButton(onClick = { showDeletePartyDialog = false }) { Text(strings.cancel) }
                 }
             }
         )
@@ -539,25 +386,86 @@ fun PartyDetailScreen(
 }
 
 @Composable
-private fun PartyTransactionCard(
+private fun ShareItems(
+    accountLabel: String,
+    onPdf: () -> Unit,
+    onImage: () -> Unit,
+    onText: () -> Unit
+) {
+    val strings = LocalStrings.current
+    DropdownMenuItem(
+        text = { Text("${strings.exportPdfStatement} • $accountLabel") },
+        leadingIcon = { Icon(Icons.Default.PictureAsPdf, contentDescription = null) },
+        onClick = onPdf
+    )
+    DropdownMenuItem(
+        text = { Text("${strings.shareImageCard} • $accountLabel") },
+        leadingIcon = { Icon(Icons.Default.ReceiptLong, contentDescription = null) },
+        onClick = onImage
+    )
+    DropdownMenuItem(
+        text = { Text("${strings.shareTextSummary} • $accountLabel") },
+        leadingIcon = { Icon(Icons.Default.TextSnippet, contentDescription = null) },
+        onClick = onText
+    )
+}
+
+@Composable
+private fun AccountBalanceBlock(
+    title: String,
+    status: String,
+    totalDebt: Long,
+    totalPaid: Long,
+    decimals: Int,
+    currencyCode: String,
+    debtColor: Color
+) {
+    val strings = LocalStrings.current
+    Text("$title • $status", fontWeight = FontWeight.SemiBold)
+    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+        Column {
+            Text(strings.totalDebtRecorded, style = MaterialTheme.typography.bodySmall)
+            Text(AmountFormatter.formatAmount(totalDebt, decimals, currencyCode), color = debtColor, fontWeight = FontWeight.Bold)
+        }
+        Column(horizontalAlignment = Alignment.End) {
+            Text(strings.totalPaidRecorded, style = MaterialTheme.typography.bodySmall)
+            Text(AmountFormatter.formatAmount(totalPaid, decimals, currencyCode), color = Color(0xFF0061A4), fontWeight = FontWeight.Bold)
+        }
+    }
+}
+
+@Composable
+private fun ActionRow(
+    firstText: String,
+    secondText: String,
+    firstColor: Color,
+    secondColor: Color,
+    onFirst: () -> Unit,
+    onSecond: () -> Unit
+) {
+    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Button(onClick = onFirst, modifier = Modifier.weight(1f), colors = ButtonDefaults.buttonColors(containerColor = firstColor)) {
+            Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(4.dp))
+            Text(firstText)
+        }
+        Button(onClick = onSecond, modifier = Modifier.weight(1f), colors = ButtonDefaults.buttonColors(containerColor = secondColor)) {
+            Icon(Icons.Default.ArrowDownward, contentDescription = null, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(4.dp))
+            Text(secondText)
+        }
+    }
+}
+
+@Composable
+private fun TransactionCard(
     transaction: LedgerTransactionEntity,
     onClick: () -> Unit,
     onDelete: () -> Unit
 ) {
     val strings = LocalStrings.current
     val type = TransactionType.from(transaction.transactionType)
-    val isDebit = type.isPositiveImpact
-
-    val badgeColor = when (type) {
-        TransactionType.CUSTOMER_DEBT -> Color(0xFF196838)
-        TransactionType.CUSTOMER_PAYMENT -> Color(0xFF0061A4)
-        TransactionType.SUPPLIER_DEBT -> Color(0xFFB3261E)
-        TransactionType.SUPPLIER_PAYMENT -> Color(0xFF0061A4)
-        TransactionType.OPENING_RECEIVABLE -> Color(0xFF196838)
-        TransactionType.OPENING_PAYABLE -> Color(0xFFB3261E)
-    }
-
-    val typeTitle = when (type) {
+    val title = when (type) {
         TransactionType.CUSTOMER_DEBT -> strings.quickActionCustomerDebt
         TransactionType.CUSTOMER_PAYMENT -> strings.quickActionCustomerPayment
         TransactionType.SUPPLIER_DEBT -> strings.quickActionSupplierDebt
@@ -567,79 +475,36 @@ private fun PartyTransactionCard(
     }
 
     Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick),
-        shape = RoundedCornerShape(18.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
     ) {
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp),
+            modifier = Modifier.fillMaxWidth().padding(14.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.weight(1f)
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(40.dp)
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(badgeColor.copy(alpha = 0.12f)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = if (isDebit) Icons.Default.ArrowUpward else Icons.Default.ArrowDownward,
-                        contentDescription = null,
-                        tint = badgeColor,
-                        modifier = Modifier.size(18.dp)
-                    )
-                }
-                Spacer(modifier = Modifier.width(12.dp))
+            Row(modifier = Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    if (type.isPositiveImpact) Icons.Default.ArrowUpward else Icons.Default.ArrowDownward,
+                    contentDescription = null,
+                    tint = if (type.isPositiveImpact) Color(0xFF196838) else Color(0xFFB3261E)
+                )
+                Spacer(Modifier.width(10.dp))
                 Column {
-                    Text(
-                        text = typeTitle,
-                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-                    Text(
-                        text = DateFormatter.formatDateTime(transaction.occurredAt),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    transaction.note?.let { n ->
-                        Text(
-                            text = n,
-                            style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.sp),
-                            color = MaterialTheme.colorScheme.outline
-                        )
-                    }
+                    Text(title, fontWeight = FontWeight.SemiBold)
+                    Text(DateFormatter.formatDateTime(transaction.occurredAt), style = MaterialTheme.typography.bodySmall)
+                    transaction.note?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
                 }
             }
-
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                val sign = if (isDebit) "+" else "-"
+            Column(horizontalAlignment = Alignment.End) {
                 Text(
-                    text = "$sign${AmountFormatter.formatAmount(transaction.amountMinor, transaction.currencyDecimalPlaces, transaction.currencyCode)}",
-                    style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.SemiBold),
-                    color = if (isDebit) Color(0xFF196838) else Color(0xFFB3261E)
+                    (if (type.isPositiveImpact) "+" else "-") +
+                        AmountFormatter.formatAmount(transaction.amountMinor, transaction.currencyDecimalPlaces, transaction.currencyCode),
+                    fontWeight = FontWeight.Bold
                 )
-
-                IconButton(
-                    onClick = onDelete,
-                    modifier = Modifier.size(32.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Delete,
-                        contentDescription = strings.delete,
-                        tint = MaterialTheme.colorScheme.outline.copy(alpha = 0.6f),
-                        modifier = Modifier.size(18.dp)
-                    )
+                IconButton(onClick = onDelete) {
+                    Icon(Icons.Default.Delete, contentDescription = strings.delete)
                 }
             }
         }
