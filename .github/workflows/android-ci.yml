@@ -36,10 +36,16 @@ jobs:
           gradle-version: '9.3.1'
 
       - name: Unit tests
-        run: gradle --no-daemon testDebugUnitTest
+        shell: bash
+        run: |
+          set -o pipefail
+          gradle --no-daemon testDebugUnitTest 2>&1 | tee ci-unit.log
 
       - name: Android lint
-        run: gradle --no-daemon lintDebug
+        shell: bash
+        run: |
+          set -o pipefail
+          gradle --no-daemon lintDebug 2>&1 | tee ci-lint.log
 
       - name: Build debug APK
         run: gradle --no-daemon assembleDebug
@@ -67,6 +73,8 @@ jobs:
         with:
           name: test-and-lint-reports
           path: |
+            ci-unit.log
+            ci-lint.log
             app/build/reports/
             app/build/test-results/
           if-no-files-found: ignore
