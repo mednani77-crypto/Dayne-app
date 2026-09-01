@@ -7,20 +7,19 @@ import com.example.data.local.AppDatabase
 import com.example.data.models.CollectionItem
 import com.example.data.models.PartyType
 import com.example.data.models.TransactionType
+import com.example.data.repository.DeynBookV12Repository
 import com.example.services.AttachmentService
 import com.example.services.CollectionCalculator
-import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 suspend fun MainViewModel.loadCollectionItems(now: Long = System.currentTimeMillis()): List<CollectionItem> {
-    val partyRows = repository.getAllPartiesWithBalancesFlow().first()
-    val parties = partyRows.map { it.party }
-    val transactions = partyRows.flatMap { row ->
-        repository.getTransactionsForPartyFlow(row.party.id).first()
-    }
+    val db = AppDatabase.getInstance(getApplication())
+    val v12 = DeynBookV12Repository(db)
     return CollectionCalculator.calculate(
-        parties = parties,
-        transactions = transactions,
+        parties = v12.getScopedParties(),
+        transactions = v12.getScopedTransactions(),
         currencies = repository.getAllCurrencies(),
         now = now
     )
@@ -40,7 +39,7 @@ fun MainViewModel.addTransactionWithExtras(
     viewModelScope.launch {
         if (amountMinor <= 0L || !isCompatibleParty(partyId, type)) return@launch
         val context = getApplication<Application>()
-        val attachmentPath = attachmentUri?.let { AttachmentService.copyToPrivateStorage(context, it) }
+        val stored = attachmentUri?.let { withContext(Dispatchers.IO) { AttachmentService.copyWithMetadata(context, it) } }
         val txId = repository.addTransaction(
             partyId = partyId,
             type = type,
@@ -50,11 +49,19 @@ fun MainViewModel.addTransactionWithExtras(
             occurredAt = occurredAt,
             note = note
         )
-        AppDatabase.getInstance(context).ledgerTransactionDao().updateExtras(
+        val db = AppDatabase.getInstance(context)
+        db.ledgerTransactionDao().updateExtras(
             id = txId,
             dueAt = dueAt.takeIf { type == TransactionType.CUSTOMER_DEBT || type == TransactionType.SUPPLIER_DEBT },
-            attachmentPath = attachmentPath
+            attachmentPath = stored?.path
         )
+        stored?.let { file ->
+            try {
+                DeynBookV12Repository(db).addAttachment(txId, file.path, file.displayName, file.mimeType, file.sizeBytes)
+            } catch (_: Exception) {
+                AttachmentService.deletePath(file.path)
+            }
+        }
     }
 }
 
@@ -74,31 +81,30 @@ fun MainViewModel.updateTransactionWithExtras(
     viewModelScope.launch {
         if (amountMinor <= 0L || !isCompatibleParty(partyId, type)) return@launch
         val context = getApplication<Application>()
+        val db = AppDatabase.getInstance(context)
+        val v12 = DeynBookV12Repository(db)
         val existing = repository.getTransactionById(id) ?: return@launch
-        val newPath = when {
+        val newStored = attachmentUri?.let { withContext(Dispatchers.IO) { AttachmentService.copyWithMetadata(context, it) } }
+
+        repository.updateTransaction(id, partyId, type, amountMinor, currencyCode, currencyDecimalPlaces, occurredAt, note)
+        val legacyPath = when {
             removeAttachment -> null
-            attachmentUri != null -> AttachmentService.copyToPrivateStorage(context, attachmentUri) ?: existing.attachmentPath
+            newStored != null -> newStored.path
             else -> existing.attachmentPath
         }
-
-        repository.updateTransaction(
-            id = id,
-            partyId = partyId,
-            type = type,
-            amountMinor = amountMinor,
-            currencyCode = currencyCode,
-            currencyDecimalPlaces = currencyDecimalPlaces,
-            occurredAt = occurredAt,
-            note = note
-        )
-        AppDatabase.getInstance(context).ledgerTransactionDao().updateExtras(
+        db.ledgerTransactionDao().updateExtras(
             id = id,
             dueAt = dueAt.takeIf { type == TransactionType.CUSTOMER_DEBT || type == TransactionType.SUPPLIER_DEBT },
-            attachmentPath = newPath
+            attachmentPath = legacyPath
         )
 
-        if ((removeAttachment || (attachmentUri != null && newPath != existing.attachmentPath)) && existing.attachmentPath != null) {
+        if (removeAttachment && existing.attachmentPath != null) {
+            v12.getAttachments(id).filter { it.filePath == existing.attachmentPath }.forEach { v12.deleteAttachment(it.id) }
             AttachmentService.deletePath(existing.attachmentPath)
+        }
+        newStored?.let { file ->
+            try { v12.addAttachment(id, file.path, file.displayName, file.mimeType, file.sizeBytes) }
+            catch (_: Exception) { AttachmentService.deletePath(file.path) }
         }
     }
 }
@@ -106,9 +112,6 @@ fun MainViewModel.updateTransactionWithExtras(
 private suspend fun MainViewModel.isCompatibleParty(partyId: String, type: TransactionType): Boolean {
     val party = repository.getPartyWithBalancesById(partyId)?.party ?: return false
     val partyType = PartyType.from(party.partyType)
-    return if (type.isReceivableImpact) {
-        partyType == PartyType.CUSTOMER || partyType == PartyType.BOTH
-    } else {
-        partyType == PartyType.SUPPLIER || partyType == PartyType.BOTH
-    }
+    return if (type.isReceivableImpact) partyType == PartyType.CUSTOMER || partyType == PartyType.BOTH
+    else partyType == PartyType.SUPPLIER || partyType == PartyType.BOTH
 }
