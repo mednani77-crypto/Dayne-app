@@ -22,11 +22,14 @@ import com.example.data.repository.DeynBookRepository
 import com.example.services.ImageShareService
 import com.example.services.PdfStatementService
 import com.example.services.ShareHelper
+import com.example.services.StatementAccountType
+import com.example.services.StatementBuilder
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -58,9 +61,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     @OptIn(ExperimentalCoroutinesApi::class)
     val dashboardSummary: StateFlow<DashboardSummary> = _selectedCurrencyCode
-        .flatMapLatest { code ->
-            repository.getDashboardSummaryFlow(code)
-        }.stateIn(
+        .flatMapLatest { code -> repository.getDashboardSummaryFlow(code) }
+        .stateIn(
             viewModelScope,
             SharingStarted.Eagerly,
             DashboardSummary("DJF", 0, 0L, 0L, 0, 0)
@@ -69,7 +71,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _userMessage = MutableStateFlow<String?>(null)
     val userMessage: StateFlow<String?> = _userMessage.asStateFlow()
 
-    // Backup restore preview state
     private val _pendingRestoreBackup = MutableStateFlow<BackupData?>(null)
     val pendingRestoreBackup: StateFlow<BackupData?> = _pendingRestoreBackup.asStateFlow()
 
@@ -107,6 +108,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun updateSettings(newSettings: SettingsEntity) {
         viewModelScope.launch {
             repository.updateSettings(newSettings)
+            if (newSettings.defaultCurrencyCode != _selectedCurrencyCode.value) {
+                setSelectedCurrencyCode(newSettings.defaultCurrencyCode)
+            }
         }
     }
 
@@ -119,15 +123,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun toggleCurrency(code: String, isEnabled: Boolean) {
         viewModelScope.launch {
+            val current = repository.getSettings()
+            if (!isEnabled && current.defaultCurrencyCode == code) return@launch
             repository.setCurrencyEnabled(code, isEnabled)
         }
     }
 
     fun addCustomCurrency(code: String, name: String, decimals: Int) {
         viewModelScope.launch {
+            val cleanCode = code.trim().uppercase()
+            if (cleanCode.isBlank() || name.trim().isBlank() || decimals !in 0..2) return@launch
             val entity = CurrencyEntity(
-                code = code,
-                name = name,
+                code = cleanCode,
+                name = name.trim(),
                 decimalPlaces = decimals,
                 isCustom = true,
                 isEnabled = true
@@ -136,9 +144,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    suspend fun searchSimilarParties(name: String): List<PartyEntity> {
-        return repository.searchSimilarParties(name)
-    }
+    suspend fun searchSimilarParties(name: String): List<PartyEntity> = repository.searchSimilarParties(name)
 
     fun createParty(
         name: String,
@@ -151,6 +157,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         currencyDecimalPlaces: Int
     ) {
         viewModelScope.launch {
+            if (name.trim().isBlank() || openingAmountMinor < 0L) return@launch
             repository.createPartyWithOptionalOpeningBalance(
                 name = name,
                 phone = phone,
@@ -166,24 +173,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun updateParty(party: PartyEntity) {
         viewModelScope.launch {
+            if (party.name.trim().isBlank()) return@launch
             repository.updateParty(party)
         }
     }
 
     fun setPartyArchived(partyId: String, isArchived: Boolean) {
-        viewModelScope.launch {
-            repository.setPartyArchived(partyId, isArchived)
-        }
+        viewModelScope.launch { repository.setPartyArchived(partyId, isArchived) }
     }
 
     fun deleteParty(partyId: String, onSuccess: () -> Unit, onError: () -> Unit) {
         viewModelScope.launch {
-            val deleted = repository.deletePartyIfNoTransactions(partyId)
-            if (deleted) {
-                onSuccess()
-            } else {
-                onError()
-            }
+            if (repository.deletePartyIfNoTransactions(partyId)) onSuccess() else onError()
         }
     }
 
@@ -197,6 +198,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         note: String?
     ) {
         viewModelScope.launch {
+            if (!isTransactionValidForParty(partyId, type) || amountMinor <= 0L) return@launch
             repository.addTransaction(
                 partyId = partyId,
                 type = type,
@@ -220,6 +222,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         note: String?
     ) {
         viewModelScope.launch {
+            if (!isTransactionValidForParty(partyId, type) || amountMinor <= 0L) return@launch
             repository.updateTransaction(
                 id = id,
                 partyId = partyId,
@@ -233,33 +236,63 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun deleteTransaction(id: String) {
-        viewModelScope.launch {
-            repository.deleteTransaction(id)
+    private suspend fun isTransactionValidForParty(partyId: String, type: TransactionType): Boolean {
+        val party = repository.getPartyWithBalancesById(partyId)?.party ?: return false
+        val partyType = PartyType.from(party.partyType)
+        return if (type.isReceivableImpact) {
+            partyType == PartyType.CUSTOMER || partyType == PartyType.BOTH
+        } else {
+            partyType == PartyType.SUPPLIER || partyType == PartyType.BOTH
         }
+    }
+
+    fun deleteTransaction(id: String) {
+        viewModelScope.launch { repository.deleteTransaction(id) }
     }
 
     suspend fun loadReportSummary(currencyCode: String, fromTime: Long, toTime: Long): TransactionReportSummary {
         return repository.getReportSummary(currencyCode, fromTime, toTime)
     }
 
-    suspend fun getStatementData(partyId: String, currencyCode: String, fromTime: Long, toTime: Long): StatementData? {
-        return repository.getStatementData(partyId, currencyCode, fromTime, toTime)
+    suspend fun buildStatementData(
+        partyId: String,
+        currencyCode: String,
+        accountType: StatementAccountType,
+        fromTime: Long,
+        toTime: Long
+    ): StatementData? {
+        val partyWithBalances = repository.getPartyWithBalancesById(partyId) ?: return null
+        val currency = repository.getCurrencyByCode(currencyCode)
+        val transactions = repository.getTransactionsForPartyFlow(partyId).first()
+        return StatementBuilder.build(
+            party = partyWithBalances.party,
+            transactions = transactions,
+            accountType = accountType,
+            currencyCode = currencyCode,
+            decimalPlaces = currency.decimalPlaces,
+            fromTimestamp = fromTime,
+            toTimestamp = toTime
+        )
     }
 
-    fun shareStatementPdf(partyId: String, currencyCode: String, language: AppLanguage) {
+    fun shareStatementPdf(
+        partyId: String,
+        currencyCode: String,
+        accountType: StatementAccountType,
+        language: AppLanguage
+    ) {
         viewModelScope.launch {
-            val partyWithBal = repository.getPartyWithBalancesById(partyId) ?: return@launch
-            val fromTime = partyWithBal.party.createdAt
+            val partyWithBalances = repository.getPartyWithBalancesById(partyId) ?: return@launch
+            val fromTime = partyWithBalances.party.createdAt
             val toTime = System.currentTimeMillis()
-
-            val statementData = repository.getStatementData(partyId, currencyCode, fromTime, toTime) ?: return@launch
+            val statementData = buildStatementData(partyId, currencyCode, accountType, fromTime, toTime) ?: return@launch
             val businessName = repository.getSettings().businessName
 
             val file = PdfStatementService.generateStatementPdf(
                 context = getApplication(),
                 businessName = businessName,
                 statementData = statementData,
+                accountType = accountType,
                 language = language
             )
 
@@ -267,29 +300,42 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 context = getApplication(),
                 file = file,
                 mimeType = "application/pdf",
-                title = "Share Statement PDF"
+                title = "DeynBook"
             )
         }
     }
 
-    fun shareImageCard(partyId: String, currencyCode: String, language: AppLanguage) {
+    fun shareImageCard(
+        partyId: String,
+        currencyCode: String,
+        accountType: StatementAccountType,
+        language: AppLanguage
+    ) {
         viewModelScope.launch {
             val partyWithBal = repository.getPartyWithBalancesById(partyId) ?: return@launch
             val decimals = repository.getCurrencyByCode(currencyCode).decimalPlaces
-            val balance = partyWithBal.getBalanceForCurrency(currencyCode) ?: com.example.data.models.PartyCurrencyBalance(currencyCode, decimals, 0L, 0L, 0L, 0L)
-
-            val txs = repository.getTransactionsForPartyFlow(partyId)
+            val balance = partyWithBal.getBalanceForCurrency(currencyCode)
+                ?: com.example.data.models.PartyCurrencyBalance(currencyCode, decimals)
             val businessName = repository.getSettings().businessName
-
-            // fetch transactions
-            val statementData = repository.getStatementData(partyId, currencyCode, 0L, System.currentTimeMillis())
-            val recentTxs = statementData?.rows?.map { it.transaction }?.reversed() ?: emptyList()
+            val allTxs = repository.getTransactionsForPartyFlow(partyId).first()
+            val recentTxs = allTxs
+                .filter { it.currencyCode == currencyCode }
+                .filter {
+                    if (accountType == StatementAccountType.CUSTOMER) {
+                        TransactionType.from(it.transactionType).isReceivableImpact
+                    } else {
+                        !TransactionType.from(it.transactionType).isReceivableImpact
+                    }
+                }
+                .sortedByDescending { it.occurredAt }
+                .take(5)
 
             val file = ImageShareService.generateSummaryCardImage(
                 context = getApplication(),
                 businessName = businessName,
                 party = partyWithBal.party,
                 balance = balance,
+                accountType = accountType,
                 recentTransactions = recentTxs,
                 language = language
             )
@@ -298,16 +344,22 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 context = getApplication(),
                 file = file,
                 mimeType = "image/png",
-                title = "Share Summary Card"
+                title = "DeynBook"
             )
         }
     }
 
-    fun shareTextSummary(partyId: String, currencyCode: String, language: AppLanguage) {
+    fun shareTextSummary(
+        partyId: String,
+        currencyCode: String,
+        accountType: StatementAccountType,
+        language: AppLanguage
+    ) {
         viewModelScope.launch {
             val partyWithBal = repository.getPartyWithBalancesById(partyId) ?: return@launch
             val decimals = repository.getCurrencyByCode(currencyCode).decimalPlaces
-            val balance = partyWithBal.getBalanceForCurrency(currencyCode) ?: com.example.data.models.PartyCurrencyBalance(currencyCode, decimals, 0L, 0L, 0L, 0L)
+            val balance = partyWithBal.getBalanceForCurrency(currencyCode)
+                ?: com.example.data.models.PartyCurrencyBalance(currencyCode, decimals)
             val businessName = repository.getSettings().businessName
 
             ShareHelper.shareTextSummary(
@@ -315,6 +367,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 businessName = businessName,
                 party = partyWithBal.party,
                 balance = balance,
+                accountType = accountType,
                 language = language
             )
         }
@@ -323,19 +376,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun exportBackup() {
         viewModelScope.launch {
             val backup = repository.exportBackupData()
-            val jsonStr = backup.toJsonString()
-
-            val file = File(getApplication<Application>().cacheDir, "DeynBook_Backup_${backup.exportedAt}.json")
-            val fos = FileOutputStream(file)
-            fos.write(jsonStr.toByteArray(Charsets.UTF_8))
-            fos.flush()
-            fos.close()
-
+            val file = File(getApplication<Application>().cacheDir, "DeynBook_Backup_${backup.exportedAt}.deynbook.json")
+            writeUtf8(file, backup.toJsonString())
             ShareHelper.shareFile(
                 context = getApplication(),
                 file = file,
                 mimeType = "application/json",
-                title = "Export DeynBook Backup"
+                title = "DeynBook Backup"
             )
         }
     }
@@ -344,16 +391,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             val csv = repository.exportAllTransactionsToCsv()
             val file = File(getApplication<Application>().cacheDir, "DeynBook_Transactions_${System.currentTimeMillis()}.csv")
-            val fos = FileOutputStream(file)
-            fos.write(csv.toByteArray(Charsets.UTF_8))
-            fos.flush()
-            fos.close()
-
+            writeUtf8(file, csv)
             ShareHelper.shareFile(
                 context = getApplication(),
                 file = file,
                 mimeType = "text/csv",
-                title = "Export CSV Report"
+                title = "DeynBook CSV"
             )
         }
     }
@@ -361,31 +404,57 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun parseBackupFromUri(uri: Uri) {
         viewModelScope.launch {
             try {
-                val inputStream = getApplication<Application>().contentResolver.openInputStream(uri)
-                val jsonStr = inputStream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }
-                if (jsonStr != null) {
-                    val backup = BackupData.fromJsonString(jsonStr)
-                    _pendingRestoreBackup.value = backup
+                val jsonStr = getApplication<Application>().contentResolver
+                    .openInputStream(uri)
+                    ?.bufferedReader(Charsets.UTF_8)
+                    ?.use { it.readText() }
+                    ?: return@launch
+                val backup = BackupData.fromJsonString(jsonStr)
+                if (backup.schemaVersion != 1) {
+                    _userMessage.value = "Unsupported backup version"
+                    return@launch
                 }
+                _pendingRestoreBackup.value = backup
             } catch (_: Exception) {
-                _userMessage.value = "Failed to parse backup file"
+                _userMessage.value = "Invalid backup file"
             }
         }
     }
 
     fun confirmRestoreBackup(backup: BackupData) {
         viewModelScope.launch {
-            val success = repository.restoreBackupData(backup)
-            _pendingRestoreBackup.value = null
-            if (success) {
-                _userMessage.value = "تم استرجاع البيانات بنجاح"
-            } else {
-                _userMessage.value = "فشل في استرجاع البيانات"
+            try {
+                // Always preserve a recoverable local copy before destructive replacement.
+                val current = repository.exportBackupData()
+                val safetyDir = File(getApplication<Application>().filesDir, "safety_backups").apply { mkdirs() }
+                val safetyFile = File(safetyDir, "before_restore_${System.currentTimeMillis()}.deynbook.json")
+                writeUtf8(safetyFile, current.toJsonString())
+
+                val success = repository.restoreBackupData(backup)
+                _pendingRestoreBackup.value = null
+                _userMessage.value = if (success) "Restore completed" else "Restore failed"
+            } catch (_: Exception) {
+                _pendingRestoreBackup.value = null
+                _userMessage.value = "Restore failed"
             }
         }
     }
 
     fun cancelRestoreBackup() {
         _pendingRestoreBackup.value = null
+    }
+
+    fun resetAllData() {
+        viewModelScope.launch {
+            repository.resetAllData()
+            _selectedCurrencyCode.value = "DJF"
+        }
+    }
+
+    private fun writeUtf8(file: File, content: String) {
+        FileOutputStream(file).use { stream ->
+            stream.write(content.toByteArray(Charsets.UTF_8))
+            stream.flush()
+        }
     }
 }

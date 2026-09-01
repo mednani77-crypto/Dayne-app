@@ -2,8 +2,8 @@ package com.example.services
 
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
 import androidx.core.content.FileProvider
-import com.example.core.formatting.AmountFormatter
 import com.example.core.formatting.DateFormatter
 import com.example.core.localization.AppLanguage
 import com.example.core.localization.AppStrings
@@ -26,9 +26,11 @@ object ShareHelper {
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
 
-        context.startActivity(Intent.createChooser(intent, title).apply {
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        })
+        context.startActivity(
+            Intent.createChooser(intent, title).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+        )
     }
 
     fun shareTextSummary(
@@ -36,19 +38,26 @@ object ShareHelper {
         businessName: String,
         party: PartyEntity,
         balance: PartyCurrencyBalance,
+        accountType: StatementAccountType,
         language: AppLanguage
     ) {
         val strings = AppStrings.get(language)
-        val isCustomer = party.partyType == "CUSTOMER" || party.partyType == "BOTH"
-        val statusText = if (isCustomer) balance.getCustomerStatusText(strings) else balance.getSupplierStatusText(strings)
+        val statusText = when (accountType) {
+            StatementAccountType.CUSTOMER -> balance.getCustomerStatusText(strings)
+            StatementAccountType.SUPPLIER -> balance.getSupplierStatusText(strings)
+        }
+        val accountLabel = when (accountType) {
+            StatementAccountType.CUSTOMER -> strings.typeCustomer
+            StatementAccountType.SUPPLIER -> strings.typeSupplier
+        }
 
-        val storeHeader = if (businessName.isNotBlank()) "$businessName\n" else ""
         val text = buildString {
-            append(storeHeader)
+            if (businessName.isNotBlank()) append("$businessName\n")
             append("${strings.statementTitle}: ${party.name}\n")
+            append("$accountLabel\n")
             append("${strings.netBalance}: $statusText\n")
             append("${strings.statementGeneratedAt} ${DateFormatter.formatDate(System.currentTimeMillis())}\n")
-            append("${strings.statementFooterText}")
+            append(strings.statementFooterText)
         }
 
         val intent = Intent(Intent.ACTION_SEND).apply {
@@ -56,22 +65,24 @@ object ShareHelper {
             putExtra(Intent.EXTRA_TEXT, text)
         }
 
-        context.startActivity(Intent.createChooser(intent, strings.shareTextSummary).apply {
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        })
+        context.startActivity(
+            Intent.createChooser(intent, strings.shareTextSummary).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+        )
     }
 
     fun dialPhoneNumber(context: Context, phone: String) {
         val cleanPhone = phone.trim()
         if (cleanPhone.isEmpty()) return
         val intent = Intent(Intent.ACTION_DIAL).apply {
-            data = android.net.Uri.parse("tel:$cleanPhone")
+            data = Uri.fromParts("tel", cleanPhone, null)
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
         try {
             context.startActivity(intent)
         } catch (_: Exception) {
-            // Dialer not available on device
+            // A dialer is not guaranteed to exist on tablets or managed devices.
         }
     }
 }

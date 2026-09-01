@@ -46,7 +46,8 @@ abstract class AppDatabase : RoomDatabase() {
                     "deynbook_database.db"
                 )
                     .addCallback(DatabaseCallback(scope))
-                    .fallbackToDestructiveMigration(false)
+                    // Intentionally no fallbackToDestructiveMigration: future schema changes
+                    // must provide explicit Room migrations so user ledger data is never wiped.
                     .build()
                 INSTANCE = instance
                 instance
@@ -57,11 +58,11 @@ abstract class AppDatabase : RoomDatabase() {
 
         val DEFAULT_CURRENCIES = listOf(
             CurrencyEntity(code = "DJF", name = "Djiboutian Franc", symbol = "Fdj", decimalPlaces = 0, isCustom = false, isEnabled = true),
-            CurrencyEntity(code = "ETB", name = "Ethiopian Birr", symbol = "Br", decimalPlaces = 2, isCustom = false, isEnabled = true),
-            CurrencyEntity(code = "SOS", name = "Somali Shilling", symbol = "Sh.So.", decimalPlaces = 0, isCustom = false, isEnabled = true),
-            CurrencyEntity(code = "SLS", name = "Somaliland Shilling", symbol = "Sl.Sh.", decimalPlaces = 0, isCustom = false, isEnabled = true),
+            CurrencyEntity(code = "ETB", name = "Ethiopian Birr", symbol = "Br", decimalPlaces = 2, isCustom = false, isEnabled = false),
+            CurrencyEntity(code = "SOS", name = "Somali Shilling", symbol = "Sh.So.", decimalPlaces = 0, isCustom = false, isEnabled = false),
+            CurrencyEntity(code = "SLS", name = "Somaliland Shilling", symbol = "Sl.Sh.", decimalPlaces = 0, isCustom = false, isEnabled = false),
             CurrencyEntity(code = "USD", name = "US Dollar", symbol = "$", decimalPlaces = 2, isCustom = false, isEnabled = true),
-            CurrencyEntity(code = "KES", name = "Kenyan Shilling", symbol = "KSh", decimalPlaces = 2, isCustom = false, isEnabled = true)
+            CurrencyEntity(code = "KES", name = "Kenyan Shilling", symbol = "KSh", decimalPlaces = 2, isCustom = false, isEnabled = false)
         )
 
         val DEFAULT_SETTINGS = SettingsEntity(

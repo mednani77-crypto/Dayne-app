@@ -1,43 +1,35 @@
 package com.example.ui.transactions
 
+import android.app.DatePickerDialog
+import android.app.TimePickerDialog
+import java.util.Calendar
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.ArrowDownward
-import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.CalendarToday
-import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.MenuAnchorType
@@ -46,6 +38,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -53,23 +46,24 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.example.core.formatting.AmountFormatter
 import com.example.core.formatting.DateFormatter
 import com.example.core.localization.LocalStrings
 import com.example.data.local.entities.CurrencyEntity
 import com.example.data.local.entities.LedgerTransactionEntity
-import com.example.data.local.entities.PartyEntity
+import com.example.data.models.PartyType
 import com.example.data.models.PartyWithBalances
 import com.example.data.models.TransactionType
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AddEditTransactionDialog(
     initialTransaction: LedgerTransactionEntity? = null,
@@ -91,257 +85,184 @@ fun AddEditTransactionDialog(
     ) -> Unit
 ) {
     val strings = LocalStrings.current
+    val context = LocalContext.current
+    val amountFocusRequester = remember { FocusRequester() }
 
     var selectedType by remember {
-        mutableStateOf(
-            if (initialTransaction != null) {
-                TransactionType.from(initialTransaction.transactionType)
-            } else preselectedType ?: TransactionType.CUSTOMER_DEBT
-        )
+        mutableStateOf(initialTransaction?.let { TransactionType.from(it.transactionType) } ?: preselectedType ?: TransactionType.CUSTOMER_DEBT)
     }
-
-    var selectedPartyId by remember {
-        mutableStateOf(initialTransaction?.partyId ?: preselectedPartyId ?: "")
-    }
-
-    var selectedCurrencyCode by remember {
-        mutableStateOf(initialTransaction?.currencyCode ?: defaultCurrencyCode)
-    }
-
-    val activeCurrency = currencies.find { it.code == selectedCurrencyCode }
-        ?: CurrencyEntity(code = selectedCurrencyCode, name = selectedCurrencyCode, decimalPlaces = 0)
-
+    var selectedPartyId by remember { mutableStateOf(initialTransaction?.partyId ?: preselectedPartyId.orEmpty()) }
+    var selectedCurrencyCode by remember { mutableStateOf(initialTransaction?.currencyCode ?: defaultCurrencyCode) }
     var amountInput by remember {
         mutableStateOf(
-            if (initialTransaction != null) {
-                AmountFormatter.formatToInputString(initialTransaction.amountMinor, initialTransaction.currencyDecimalPlaces)
-            } else ""
+            initialTransaction?.let {
+                AmountFormatter.formatToInputString(it.amountMinor, it.currencyDecimalPlaces)
+            }.orEmpty()
         )
     }
-
-    var note by remember { mutableStateOf(initialTransaction?.note ?: "") }
+    var note by remember { mutableStateOf(initialTransaction?.note.orEmpty()) }
     var occurredAt by remember { mutableLongStateOf(initialTransaction?.occurredAt ?: System.currentTimeMillis()) }
 
-    var partyDropdownExpanded by remember { mutableStateOf(false) }
-    var currencyDropdownExpanded by remember { mutableStateOf(false) }
-
+    var partyMenuExpanded by remember { mutableStateOf(false) }
+    var currencyMenuExpanded by remember { mutableStateOf(false) }
     var partyError by remember { mutableStateOf(false) }
     var amountError by remember { mutableStateOf(false) }
     var isSaving by remember { mutableStateOf(false) }
 
-    // Filter candidate parties according to selected transaction type
+    val activeCurrency = currencies.find { it.code == selectedCurrencyCode }
+        ?: CurrencyEntity(code = selectedCurrencyCode, name = selectedCurrencyCode, decimalPlaces = 0)
+
     val filteredParties = remember(partiesWithBalances, selectedType) {
-        partiesWithBalances.filter { !it.party.isArchived }
+        partiesWithBalances.filter { item ->
+            if (item.party.isArchived) return@filter false
+            val type = PartyType.from(item.party.partyType)
+            if (selectedType.isReceivableImpact) {
+                type == PartyType.CUSTOMER || type == PartyType.BOTH
+            } else {
+                type == PartyType.SUPPLIER || type == PartyType.BOTH
+            }
+        }
     }
 
-    val selectedPartyWithBal = partiesWithBalances.find { it.party.id == selectedPartyId }
+    val selectedParty = partiesWithBalances.find { it.party.id == selectedPartyId }
 
-    // Check for Overpayment / Advance warning
+    LaunchedEffect(selectedType) {
+        val selectedTypeOfParty = selectedParty?.party?.let { PartyType.from(it.partyType) }
+        val compatible = if (selectedType.isReceivableImpact) {
+            selectedTypeOfParty == PartyType.CUSTOMER || selectedTypeOfParty == PartyType.BOTH
+        } else {
+            selectedTypeOfParty == PartyType.SUPPLIER || selectedTypeOfParty == PartyType.BOTH
+        }
+        if (selectedPartyId.isNotBlank() && !compatible) selectedPartyId = ""
+    }
+
+    LaunchedEffect(Unit) {
+        if (initialTransaction == null) amountFocusRequester.requestFocus()
+    }
+
     val parsedMinor = AmountFormatter.parseToMinorUnits(amountInput, activeCurrency.decimalPlaces) ?: 0L
-    val warningMessage = remember(selectedPartyWithBal, selectedType, parsedMinor, selectedCurrencyCode) {
-        if (selectedPartyWithBal != null && parsedMinor > 0L) {
-            val bal = selectedPartyWithBal.getBalanceForCurrency(selectedCurrencyCode)
-            when (selectedType) {
-                TransactionType.CUSTOMER_PAYMENT -> {
-                    val currentOwed = bal?.customerBalance ?: 0L
-                    if (parsedMinor > currentOwed && currentOwed > 0L) strings.overpaymentWarning else null
-                }
-                TransactionType.SUPPLIER_PAYMENT -> {
-                    val currentOwed = bal?.supplierBalance ?: 0L
-                    if (parsedMinor > currentOwed && currentOwed > 0L) strings.advancePaymentWarning else null
-                }
-                else -> null
+    val overpaymentWarning = remember(selectedParty, selectedType, parsedMinor, selectedCurrencyCode) {
+        if (selectedParty == null || parsedMinor <= 0L) return@remember null
+        val balance = selectedParty.getBalanceForCurrency(selectedCurrencyCode)
+        when (selectedType) {
+            TransactionType.CUSTOMER_PAYMENT -> {
+                val outstanding = balance?.customerBalance ?: 0L
+                if (parsedMinor > outstanding) strings.overpaymentWarning else null
             }
-        } else null
+            TransactionType.SUPPLIER_PAYMENT -> {
+                val outstanding = balance?.supplierBalance ?: 0L
+                if (parsedMinor > outstanding) strings.advancePaymentWarning else null
+            }
+            else -> null
+        }
+    }
+
+    fun openDatePicker() {
+        val cal = Calendar.getInstance().apply { timeInMillis = occurredAt }
+        DatePickerDialog(
+            context,
+            { _, year, month, day ->
+                val updated = Calendar.getInstance().apply {
+                    timeInMillis = occurredAt
+                    set(Calendar.YEAR, year)
+                    set(Calendar.MONTH, month)
+                    set(Calendar.DAY_OF_MONTH, day)
+                }
+                occurredAt = updated.timeInMillis
+            },
+            cal.get(Calendar.YEAR),
+            cal.get(Calendar.MONTH),
+            cal.get(Calendar.DAY_OF_MONTH)
+        ).show()
+    }
+
+    fun openTimePicker() {
+        val cal = Calendar.getInstance().apply { timeInMillis = occurredAt }
+        TimePickerDialog(
+            context,
+            { _, hour, minute ->
+                val updated = Calendar.getInstance().apply {
+                    timeInMillis = occurredAt
+                    set(Calendar.HOUR_OF_DAY, hour)
+                    set(Calendar.MINUTE, minute)
+                    set(Calendar.SECOND, 0)
+                    set(Calendar.MILLISECOND, 0)
+                }
+                occurredAt = updated.timeInMillis
+            },
+            cal.get(Calendar.HOUR_OF_DAY),
+            cal.get(Calendar.MINUTE),
+            true
+        ).show()
     }
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        shape = RoundedCornerShape(20.dp),
-        title = {
-            Text(
-                text = if (initialTransaction == null) strings.addTransaction else strings.edit,
-                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold)
-            )
-        },
+        title = { Text(if (initialTransaction == null) strings.addTransaction else strings.edit, fontWeight = FontWeight.Bold) },
         text = {
             Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .verticalScroll(rememberScrollState())
+                modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                // 4 Transaction Type Selection Cards
-                Text(
-                    text = strings.partyTypeLabel,
-                    style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Spacer(modifier = Modifier.height(8.dp))
+                TransactionTypeGrid(selectedType = selectedType, onSelected = { selectedType = it })
 
-                // Top row: Customer types
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    TypeSelectCard(
-                        title = strings.quickActionCustomerDebt,
-                        subtitle = strings.txSubtitleCustomerDebt,
-                        isSelected = selectedType == TransactionType.CUSTOMER_DEBT,
-                        icon = Icons.Default.ArrowUpward,
-                        iconColor = Color(0xFF196838),
-                        onClick = { selectedType = TransactionType.CUSTOMER_DEBT },
-                        modifier = Modifier.weight(1f)
-                    )
-                    TypeSelectCard(
-                        title = strings.quickActionCustomerPayment,
-                        subtitle = strings.txSubtitleCustomerPayment,
-                        isSelected = selectedType == TransactionType.CUSTOMER_PAYMENT,
-                        icon = Icons.Default.ArrowDownward,
-                        iconColor = Color(0xFF0061A4),
-                        onClick = { selectedType = TransactionType.CUSTOMER_PAYMENT },
-                        modifier = Modifier.weight(1f)
-                    )
-                }
-
-                Spacer(modifier = Modifier.height(8.dp))
-
-                // Bottom row: Supplier types
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    TypeSelectCard(
-                        title = strings.quickActionSupplierDebt,
-                        subtitle = strings.txSubtitleSupplierDebt,
-                        isSelected = selectedType == TransactionType.SUPPLIER_DEBT,
-                        icon = Icons.Default.ArrowUpward,
-                        iconColor = Color(0xFFB3261E),
-                        onClick = { selectedType = TransactionType.SUPPLIER_DEBT },
-                        modifier = Modifier.weight(1f)
-                    )
-                    TypeSelectCard(
-                        title = strings.quickActionSupplierPayment,
-                        subtitle = strings.txSubtitleSupplierPayment,
-                        isSelected = selectedType == TransactionType.SUPPLIER_PAYMENT,
-                        icon = Icons.Default.ArrowDownward,
-                        iconColor = Color(0xFF0061A4),
-                        onClick = { selectedType = TransactionType.SUPPLIER_PAYMENT },
-                        modifier = Modifier.weight(1f)
-                    )
-                }
-
-                Spacer(modifier = Modifier.height(16.dp))
-
-                // Party Selector with Exposed Dropdown & Add Option
-                ExposedDropdownMenuBox(
-                    expanded = partyDropdownExpanded,
-                    onExpandedChange = { partyDropdownExpanded = it }
-                ) {
+                ExposedDropdownMenuBox(expanded = partyMenuExpanded, onExpandedChange = { partyMenuExpanded = it }) {
                     OutlinedTextField(
-                        value = selectedPartyWithBal?.party?.name ?: "",
+                        value = selectedParty?.party?.name.orEmpty(),
                         onValueChange = {},
                         readOnly = true,
-                        label = { Text(strings.selectParty + " *") },
-                        placeholder = { Text(strings.selectParty) },
-                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = partyDropdownExpanded) },
+                        label = { Text(strings.selectParty) },
                         isError = partyError,
-                        supportingText = if (partyError) {
-                            { Text(strings.errorSelectParty, color = MaterialTheme.colorScheme.error) }
-                        } else null,
+                        supportingText = if (partyError) ({ Text(strings.errorSelectParty) }) else null,
+                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(partyMenuExpanded) },
                         modifier = Modifier
-                            .menuAnchor(MenuAnchorType.PrimaryNotEditable)
                             .fillMaxWidth()
-                            .testTag("tx_party_selector"),
-                        shape = RoundedCornerShape(12.dp)
+                            .menuAnchor(MenuAnchorType.PrimaryNotEditable)
+                            .testTag("tx_party_selector")
                     )
-
-                    ExposedDropdownMenu(
-                        expanded = partyDropdownExpanded,
-                        onDismissRequest = { partyDropdownExpanded = false }
-                    ) {
+                    ExposedDropdownMenu(expanded = partyMenuExpanded, onDismissRequest = { partyMenuExpanded = false }) {
                         DropdownMenuItem(
-                            text = {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(
-                                        imageVector = Icons.Default.Add,
-                                        contentDescription = null,
-                                        tint = MaterialTheme.colorScheme.primary
-                                    )
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Text(
-                                        text = strings.addNewPartyOption,
-                                        color = MaterialTheme.colorScheme.primary,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                }
-                            },
+                            text = { Text(strings.addNewPartyOption, color = MaterialTheme.colorScheme.primary) },
+                            leadingIcon = { Icon(Icons.Default.Add, contentDescription = null) },
                             onClick = {
-                                partyDropdownExpanded = false
+                                partyMenuExpanded = false
                                 onOpenAddParty()
                             }
                         )
-
                         filteredParties.forEach { item ->
-                            val party = item.party
-                            val bal = item.getBalanceForCurrency(selectedCurrencyCode)
-                            val balText = when (selectedType) {
-                                TransactionType.CUSTOMER_DEBT, TransactionType.CUSTOMER_PAYMENT -> bal?.getCustomerStatusText(strings) ?: ""
-                                else -> bal?.getSupplierStatusText(strings) ?: ""
-                            }
-
                             DropdownMenuItem(
-                                text = {
-                                    Column {
-                                        Text(party.name, fontWeight = FontWeight.SemiBold)
-                                        if (balText.isNotBlank()) {
-                                            Text(
-                                                text = balText,
-                                                style = MaterialTheme.typography.bodySmall,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                                            )
-                                        }
-                                    }
-                                },
+                                text = { Text(item.party.name) },
                                 onClick = {
-                                    selectedPartyId = party.id
+                                    selectedPartyId = item.party.id
                                     partyError = false
-                                    partyDropdownExpanded = false
+                                    partyMenuExpanded = false
                                 }
                             )
                         }
                     }
                 }
 
-                Spacer(modifier = Modifier.height(12.dp))
-
-                // Amount and Currency Row
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedTextField(
                         value = amountInput,
                         onValueChange = {
                             amountInput = it
-                            if (it.isNotBlank()) amountError = false
+                            amountError = false
                         },
-                        label = { Text(strings.amountLabel + " *") },
+                        label = { Text(strings.amountLabel) },
                         isError = amountError,
-                        supportingText = if (amountError) {
-                            { Text(strings.errorAmountMustBePositive, color = MaterialTheme.colorScheme.error) }
-                        } else null,
+                        supportingText = if (amountError) ({ Text(strings.errorAmountMustBePositive) }) else null,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        singleLine = true,
                         modifier = Modifier
                             .weight(1.5f)
-                            .testTag("tx_amount_input"),
-                        shape = RoundedCornerShape(12.dp),
-                        singleLine = true,
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal)
+                            .focusRequester(amountFocusRequester)
+                            .testTag("tx_amount_input")
                     )
 
-                    // Currency Dropdown
                     ExposedDropdownMenuBox(
-                        expanded = currencyDropdownExpanded,
-                        onExpandedChange = { currencyDropdownExpanded = it },
+                        expanded = currencyMenuExpanded,
+                        onExpandedChange = { currencyMenuExpanded = it },
                         modifier = Modifier.weight(1f)
                     ) {
                         OutlinedTextField(
@@ -349,23 +270,18 @@ fun AddEditTransactionDialog(
                             onValueChange = {},
                             readOnly = true,
                             label = { Text(strings.currencyLabel) },
-                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = currencyDropdownExpanded) },
-                            modifier = Modifier
-                                .menuAnchor(MenuAnchorType.PrimaryNotEditable)
-                                .fillMaxWidth(),
-                            shape = RoundedCornerShape(12.dp)
+                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(currencyMenuExpanded) },
+                            modifier = Modifier.fillMaxWidth().menuAnchor(MenuAnchorType.PrimaryNotEditable)
                         )
-
-                        ExposedDropdownMenu(
-                            expanded = currencyDropdownExpanded,
-                            onDismissRequest = { currencyDropdownExpanded = false }
-                        ) {
-                            currencies.filter { it.isEnabled }.forEach { cur ->
+                        ExposedDropdownMenu(expanded = currencyMenuExpanded, onDismissRequest = { currencyMenuExpanded = false }) {
+                            currencies.filter { it.isEnabled }.forEach { currency ->
                                 DropdownMenuItem(
-                                    text = { Text(cur.code, fontWeight = FontWeight.Bold) },
+                                    text = { Text(currency.code, fontWeight = FontWeight.Bold) },
                                     onClick = {
-                                        selectedCurrencyCode = cur.code
-                                        currencyDropdownExpanded = false
+                                        selectedCurrencyCode = currency.code
+                                        amountInput = ""
+                                        amountError = false
+                                        currencyMenuExpanded = false
                                     }
                                 )
                             }
@@ -373,115 +289,64 @@ fun AddEditTransactionDialog(
                     }
                 }
 
-                // Overpayment / Advance Warning Alert
-                if (warningMessage != null) {
-                    Spacer(modifier = Modifier.height(8.dp))
+                overpaymentWarning?.let { warning ->
                     Surface(
-                        color = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.5f),
+                        color = MaterialTheme.colorScheme.tertiaryContainer,
                         shape = RoundedCornerShape(10.dp)
                     ) {
-                        Row(
-                            modifier = Modifier.padding(10.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Warning,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.tertiary,
-                                modifier = Modifier.size(18.dp)
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                text = warningMessage,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onTertiaryContainer
-                            )
+                        Row(modifier = Modifier.padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.Warning, contentDescription = null)
+                            Text(warning, modifier = Modifier.padding(start = 8.dp))
                         }
                     }
                 }
 
-                Spacer(modifier = Modifier.height(12.dp))
-
-                // Date display
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f))
-                        .padding(horizontal = 12.dp, vertical = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            imageVector = Icons.Default.CalendarToday,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = strings.dateLabel + ":",
-                            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold)
-                        )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Card(
+                        modifier = Modifier.weight(1f).clickable { openDatePicker() },
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                    ) {
+                        Row(modifier = Modifier.padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.CalendarToday, contentDescription = null)
+                            Text(DateFormatter.formatDate(occurredAt), modifier = Modifier.padding(start = 6.dp))
+                        }
                     }
-                    Text(
-                        text = DateFormatter.formatDateTime(occurredAt),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                    Card(
+                        modifier = Modifier.weight(1f).clickable { openTimePicker() },
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                    ) {
+                        Row(modifier = Modifier.padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.Schedule, contentDescription = null)
+                            Text(DateFormatter.formatTime(occurredAt), modifier = Modifier.padding(start = 6.dp))
+                        }
+                    }
                 }
 
-                Spacer(modifier = Modifier.height(12.dp))
-
-                // Note Field
                 OutlinedTextField(
                     value = note,
                     onValueChange = { note = it },
                     label = { Text(strings.noteLabel) },
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp),
-                    maxLines = 2
+                    maxLines = 3,
+                    modifier = Modifier.fillMaxWidth()
                 )
-
-                Spacer(modifier = Modifier.height(8.dp))
-
-                // Quick Note Chips
-                FlowRow(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    val chips = listOf(
-                        strings.noteChipCash,
-                        strings.noteChipWaafi,
-                        strings.noteChipGoods,
-                        strings.noteChipPartial
-                    )
-                    chips.forEach { chipText ->
-                        FilterChip(
-                            selected = note == chipText,
-                            onClick = { note = chipText },
-                            label = { Text(chipText, fontSize = 12.sp) }
-                        )
-                    }
-                }
             }
         },
         confirmButton = {
             Button(
+                enabled = !isSaving,
+                modifier = Modifier.testTag("save_transaction_button"),
                 onClick = {
-                    if (isSaving) return@Button
-                    val minor = AmountFormatter.parseToMinorUnits(amountInput, activeCurrency.decimalPlaces)
-
                     if (selectedPartyId.isBlank()) {
                         partyError = true
                         return@Button
                     }
+                    val minor = AmountFormatter.parseToMinorUnits(amountInput, activeCurrency.decimalPlaces)
                     if (minor == null || minor <= 0L) {
                         amountError = true
                         return@Button
                     }
-
                     isSaving = true
                     onSaveTransaction(
                         selectedPartyId,
@@ -492,93 +357,54 @@ fun AddEditTransactionDialog(
                         occurredAt,
                         note.trim().takeIf { it.isNotBlank() }
                     )
-                },
-                shape = RoundedCornerShape(10.dp),
-                modifier = Modifier.testTag("save_transaction_button"),
-                enabled = !isSaving
-            ) {
-                Text(strings.save)
-            }
+                }
+            ) { Text(strings.save) }
         },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text(strings.cancel)
-            }
-        }
+        dismissButton = { TextButton(onClick = onDismiss) { Text(strings.cancel) } }
     )
 }
 
 @Composable
-private fun TypeSelectCard(
+private fun TransactionTypeGrid(
+    selectedType: TransactionType,
+    onSelected: (TransactionType) -> Unit
+) {
+    val strings = LocalStrings.current
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            TypeCard(strings.quickActionCustomerDebt, selectedType == TransactionType.CUSTOMER_DEBT, Color(0xFF196838), Modifier.weight(1f)) {
+                onSelected(TransactionType.CUSTOMER_DEBT)
+            }
+            TypeCard(strings.quickActionCustomerPayment, selectedType == TransactionType.CUSTOMER_PAYMENT, Color(0xFF0061A4), Modifier.weight(1f)) {
+                onSelected(TransactionType.CUSTOMER_PAYMENT)
+            }
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            TypeCard(strings.quickActionSupplierDebt, selectedType == TransactionType.SUPPLIER_DEBT, Color(0xFFB3261E), Modifier.weight(1f)) {
+                onSelected(TransactionType.SUPPLIER_DEBT)
+            }
+            TypeCard(strings.quickActionSupplierPayment, selectedType == TransactionType.SUPPLIER_PAYMENT, Color(0xFF0061A4), Modifier.weight(1f)) {
+                onSelected(TransactionType.SUPPLIER_PAYMENT)
+            }
+        }
+    }
+}
+
+@Composable
+private fun TypeCard(
     title: String,
-    subtitle: String,
-    isSelected: Boolean,
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    iconColor: Color,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier
+    selected: Boolean,
+    accent: Color,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit
 ) {
     Card(
-        modifier = modifier
-            .clip(RoundedCornerShape(16.dp))
-            .clickable(onClick = onClick),
-        shape = RoundedCornerShape(16.dp),
+        modifier = modifier.clickable(onClick = onClick),
+        border = BorderStroke(1.dp, if (selected) accent else MaterialTheme.colorScheme.outlineVariant),
         colors = CardDefaults.cardColors(
-            containerColor = if (isSelected) MaterialTheme.colorScheme.surfaceVariant else MaterialTheme.colorScheme.surface
-        ),
-        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
-        border = BorderStroke(
-            1.dp,
-            if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant
+            containerColor = if (selected) accent.copy(alpha = 0.12f) else MaterialTheme.colorScheme.surface
         )
     ) {
-        Column(
-            modifier = Modifier.padding(12.dp),
-            horizontalAlignment = Alignment.Start
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(32.dp)
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(iconColor.copy(alpha = 0.12f)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = icon,
-                        contentDescription = null,
-                        tint = iconColor,
-                        modifier = Modifier.size(18.dp)
-                    )
-                }
-                if (isSelected) {
-                    Icon(
-                        imageVector = Icons.Default.Check,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(18.dp)
-                    )
-                }
-            }
-            Spacer(modifier = Modifier.height(8.dp))
-            Text(
-                text = title,
-                style = MaterialTheme.typography.bodyMedium.copy(
-                    fontWeight = FontWeight.SemiBold,
-                    fontSize = 12.sp
-                ),
-                color = MaterialTheme.colorScheme.onSurface,
-                maxLines = 1
-            )
-            Text(
-                text = subtitle,
-                style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.sp),
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
+        Text(title, modifier = Modifier.padding(12.dp), fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium)
     }
 }

@@ -14,7 +14,6 @@ import com.example.core.localization.AppStrings
 import com.example.data.local.entities.LedgerTransactionEntity
 import com.example.data.local.entities.PartyEntity
 import com.example.data.models.PartyCurrencyBalance
-import com.example.data.models.PartyType
 import com.example.data.models.TransactionType
 import java.io.File
 import java.io.FileOutputStream
@@ -26,6 +25,7 @@ object ImageShareService {
         businessName: String,
         party: PartyEntity,
         balance: PartyCurrencyBalance,
+        accountType: StatementAccountType,
         recentTransactions: List<LedgerTransactionEntity>,
         language: AppLanguage
     ): File {
@@ -36,19 +36,15 @@ object ImageShareService {
         val height = 950
         val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
-
-        // Background Canvas
         canvas.drawColor(Color.parseColor("#F4FBF9"))
 
         val paint = Paint(Paint.ANTI_ALIAS_FLAG)
         val bold = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
         val regular = Typeface.create(Typeface.DEFAULT, Typeface.NORMAL)
 
-        // Header Background
         paint.color = Color.parseColor("#00695C")
         canvas.drawRoundRect(RectF(24f, 24f, width - 24f, 170f), 24f, 24f, paint)
 
-        // Header Store Name
         paint.color = Color.WHITE
         paint.typeface = bold
         paint.textSize = 28f
@@ -62,25 +58,21 @@ object ImageShareService {
         paint.color = Color.parseColor("#B2DFDB")
         canvas.drawText("${strings.statementTitle} • ${balance.currencyCode}", hX, 120f, paint)
 
-        // Date on Header right
         paint.textAlign = if (isRtl) Paint.Align.LEFT else Paint.Align.RIGHT
         val dX = if (isRtl) 60f else width - 60f
         paint.textSize = 16f
         canvas.drawText(DateFormatter.formatDate(System.currentTimeMillis()), dX, 90f, paint)
 
-        // Person Card Box
         paint.color = Color.WHITE
         paint.style = Paint.Style.FILL
         canvas.drawRoundRect(RectF(24f, 190f, width - 24f, 430f), 20f, 20f, paint)
 
-        // Border
         paint.color = Color.parseColor("#E0E0E0")
         paint.style = Paint.Style.STROKE
         paint.strokeWidth = 2f
         canvas.drawRoundRect(RectF(24f, 190f, width - 24f, 430f), 20f, 20f, paint)
         paint.style = Paint.Style.FILL
 
-        // Person Name & Type
         paint.color = Color.parseColor("#212121")
         paint.typeface = bold
         paint.textSize = 28f
@@ -91,48 +83,47 @@ object ImageShareService {
         paint.typeface = regular
         paint.textSize = 18f
         paint.color = Color.parseColor("#757575")
-        val partyTypeLabel = when (PartyType.from(party.partyType)) {
-            PartyType.CUSTOMER -> strings.typeCustomer
-            PartyType.SUPPLIER -> strings.typeSupplier
-            PartyType.BOTH -> strings.typeBoth
+        val accountTypeLabel = when (accountType) {
+            StatementAccountType.CUSTOMER -> strings.typeCustomer
+            StatementAccountType.SUPPLIER -> strings.typeSupplier
         }
         val phoneStr = party.phone?.let { " • $it" } ?: ""
-        canvas.drawText("$partyTypeLabel$phoneStr", pX, 280f, paint)
+        canvas.drawText("$accountTypeLabel$phoneStr", pX, 280f, paint)
 
-        // Big Balance Display
-        val isCustomer = party.partyType == PartyType.CUSTOMER.value || party.partyType == PartyType.BOTH.value
-        val balAmount = if (isCustomer) balance.customerBalance else balance.supplierBalance
-        val statusText = if (isCustomer) balance.getCustomerStatusText(strings) else balance.getSupplierStatusText(strings)
+        val balAmount = when (accountType) {
+            StatementAccountType.CUSTOMER -> balance.customerBalance
+            StatementAccountType.SUPPLIER -> balance.supplierBalance
+        }
+        val statusText = when (accountType) {
+            StatementAccountType.CUSTOMER -> balance.getCustomerStatusText(strings)
+            StatementAccountType.SUPPLIER -> balance.getSupplierStatusText(strings)
+        }
 
         paint.typeface = bold
         paint.textSize = 34f
         paint.color = when {
-            balAmount > 0 -> Color.parseColor("#00796B") // Standard Debt
-            balAmount < 0 -> Color.parseColor("#D32F2F") // Credit/Advance
-            else -> Color.parseColor("#388E3C")         // Settled
+            balAmount > 0 -> Color.parseColor("#00796B")
+            balAmount < 0 -> Color.parseColor("#D32F2F")
+            else -> Color.parseColor("#388E3C")
         }
         canvas.drawText(statusText, pX, 360f, paint)
 
-        // Recent 5 Transactions Box Header
         paint.color = Color.parseColor("#37474F")
         paint.typeface = bold
         paint.textSize = 20f
-        canvas.drawText("${strings.recentTransactions} (5)", pX, 475f, paint)
+        canvas.drawText("${strings.recentTransactions} (${recentTransactions.take(5).size})", pX, 475f, paint)
 
-        // Recent transactions rows
-        val take5 = recentTransactions.take(5)
         var rowY = 515f
-        val rHeight = 65f
-
-        for (tx in take5) {
+        val rowHeight = 65f
+        for (tx in recentTransactions.take(5)) {
             paint.color = Color.WHITE
             paint.style = Paint.Style.FILL
-            canvas.drawRoundRect(RectF(24f, rowY, width - 24f, rowY + rHeight - 10f), 12f, 12f, paint)
+            canvas.drawRoundRect(RectF(24f, rowY, width - 24f, rowY + rowHeight - 10f), 12f, 12f, paint)
 
             val type = TransactionType.from(tx.transactionType)
-            val isDebit = type.isPositiveImpact
-            val signStr = if (isDebit) "+" else "-"
-            val amountStr = "$signStr${AmountFormatter.formatAmount(tx.amountMinor, tx.currencyDecimalPlaces, tx.currencyCode)}"
+            val isDebt = type.isPositiveImpact
+            val amountStr = (if (isDebt) "+" else "-") +
+                AmountFormatter.formatAmount(tx.amountMinor, tx.currencyDecimalPlaces, tx.currencyCode)
             val dateStr = DateFormatter.formatDate(tx.occurredAt)
             val noteStr = tx.note?.take(22) ?: when (type) {
                 TransactionType.CUSTOMER_DEBT -> strings.quickActionCustomerDebt
@@ -152,28 +143,27 @@ object ImageShareService {
             paint.typeface = bold
             paint.textSize = 18f
             paint.textAlign = if (isRtl) Paint.Align.LEFT else Paint.Align.RIGHT
-            paint.color = if (isDebit) Color.parseColor("#00796B") else Color.parseColor("#E65100")
-            val valX = if (isRtl) 60f else width - 60f
-            canvas.drawText(amountStr, valX, rowY + 34f, paint)
+            paint.color = if (isDebt) Color.parseColor("#00796B") else Color.parseColor("#E65100")
+            val valueX = if (isRtl) 60f else width - 60f
+            canvas.drawText(amountStr, valueX, rowY + 34f, paint)
 
-            rowY += rHeight
+            rowY += rowHeight
         }
 
-        // Footer Branding
         paint.color = Color.parseColor("#78909C")
         paint.typeface = regular
         paint.textSize = 16f
         paint.textAlign = Paint.Align.CENTER
         canvas.drawText(strings.statementFooterText, width / 2f, height - 35f, paint)
 
-        // Save Bitmap to Cache
-        val safeName = party.name.replace(Regex("[^a-zA-Z0-9_\\-\\u0600-\\u06FF]"), "_")
-        val file = File(context.cacheDir, "DeynBook_Card_${safeName}_${balance.currencyCode}.png")
-        val stream = FileOutputStream(file)
-        bitmap.compress(Bitmap.CompressFormat.PNG, 100, stream)
-        stream.flush()
-        stream.close()
-
+        val safeName = party.name.replace(Regex("[^\\p{L}\\p{N}_\\-]"), "_")
+        val suffix = if (accountType == StatementAccountType.CUSTOMER) "customer" else "supplier"
+        val file = File(context.cacheDir, "DeynBook_Card_${safeName}_${suffix}_${balance.currencyCode}.png")
+        FileOutputStream(file).use { stream ->
+            bitmap.compress(Bitmap.CompressFormat.PNG, 100, stream)
+            stream.flush()
+        }
+        bitmap.recycle()
         return file
     }
 }
