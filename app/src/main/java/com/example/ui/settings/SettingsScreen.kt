@@ -23,6 +23,7 @@ import androidx.compose.material.icons.filled.CurrencyExchange
 import androidx.compose.material.icons.filled.DeleteForever
 import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.FileUpload
+import androidx.compose.material.icons.filled.Fingerprint
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Store
@@ -48,16 +49,20 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import androidx.fragment.app.FragmentActivity
+import com.example.BuildConfig
 import com.example.core.formatting.DateFormatter
 import com.example.core.localization.AppLanguage
+import com.example.core.localization.FeatureStringsProvider
 import com.example.core.localization.LocalStrings
 import com.example.data.local.entities.CurrencyEntity
 import com.example.data.local.entities.SettingsEntity
+import com.example.services.BiometricLock
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -75,10 +80,15 @@ fun SettingsScreen(
     onResetAllData: () -> Unit
 ) {
     val strings = LocalStrings.current
+    val featureStrings = FeatureStringsProvider.get(currentLanguage)
+    val context = LocalContext.current
+    val activity = context as? FragmentActivity
+    val biometricAvailable = activity?.let(BiometricLock::isAvailable) == true
 
     var showProfileDialog by remember { mutableStateOf(false) }
     var showLanguageDialog by remember { mutableStateOf(false) }
     var showThemeDialog by remember { mutableStateOf(false) }
+    var showCalendarDialog by remember { mutableStateOf(false) }
     var showDefaultCurrencyDialog by remember { mutableStateOf(false) }
     var showAddCurrencyDialog by remember { mutableStateOf(false) }
     var showPrivacyDialog by remember { mutableStateOf(false) }
@@ -92,10 +102,7 @@ fun SettingsScreen(
         topBar = { TopAppBar(title = { Text(strings.settingsTitle, fontWeight = FontWeight.Bold) }) }
     ) { paddingValues ->
         LazyColumn(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(paddingValues)
-                .padding(horizontal = 16.dp),
+            modifier = Modifier.fillMaxSize().padding(paddingValues).padding(horizontal = 16.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
             item {
@@ -124,6 +131,37 @@ fun SettingsScreen(
                         },
                         onClick = { showThemeDialog = true }
                     )
+                    SettingsRow(
+                        title = featureStrings.calendarTitle,
+                        subtitle = if (settings.calendarMode == DateFormatter.CALENDAR_ETHIOPIAN) featureStrings.ethiopianCalendar else featureStrings.gregorianCalendar,
+                        onClick = { showCalendarDialog = true }
+                    )
+                }
+            }
+
+            item {
+                SettingsCard(featureStrings.biometricLock, Icons.Default.Fingerprint) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(featureStrings.biometricLock, fontWeight = FontWeight.SemiBold)
+                            Text(
+                                if (biometricAvailable) featureStrings.biometricLockDesc else featureStrings.biometricUnavailable,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Switch(
+                            checked = settings.biometricLockEnabled && biometricAvailable,
+                            enabled = biometricAvailable,
+                            onCheckedChange = { enabled ->
+                                onUpdateSettings(settings.copy(biometricLockEnabled = enabled))
+                            }
+                        )
+                    }
                 }
             }
 
@@ -172,10 +210,7 @@ fun SettingsScreen(
                             Text("${strings.lastBackupDate} ${DateFormatter.formatDateTime(it)}", style = MaterialTheme.typography.bodySmall)
                         }
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Button(
-                                onClick = onExportBackup,
-                                modifier = Modifier.weight(1f).testTag("export_backup_button")
-                            ) {
+                            Button(onClick = onExportBackup, modifier = Modifier.weight(1f).testTag("export_backup_button")) {
                                 Icon(Icons.Default.FileUpload, contentDescription = null)
                                 Text(strings.createBackup)
                             }
@@ -187,10 +222,7 @@ fun SettingsScreen(
                                 Text(strings.restoreBackup)
                             }
                         }
-                        Button(
-                            onClick = onExportCsv,
-                            modifier = Modifier.fillMaxWidth().testTag("export_all_csv_button")
-                        ) {
+                        Button(onClick = onExportCsv, modifier = Modifier.fillMaxWidth().testTag("export_all_csv_button")) {
                             Icon(Icons.Default.FileDownload, contentDescription = null)
                             Text(strings.exportCsv)
                         }
@@ -206,8 +238,8 @@ fun SettingsScreen(
                         onClick = { showPrivacyDialog = true }
                     )
                     Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp)) {
-                        Text(strings.appVersionLabel, fontWeight = FontWeight.SemiBold)
-                        Text("1.0.0", style = MaterialTheme.typography.bodySmall)
+                        Text(strings.appName, fontWeight = FontWeight.SemiBold)
+                        Text(BuildConfig.VERSION_NAME, style = MaterialTheme.typography.bodySmall)
                     }
                 }
             }
@@ -303,11 +335,7 @@ fun SettingsScreen(
             title = { Text(strings.themeTitle) },
             text = {
                 Column {
-                    listOf(
-                        "SYSTEM" to strings.themeSystem,
-                        "LIGHT" to strings.themeLight,
-                        "DARK" to strings.themeDark
-                    ).forEach { (mode, label) ->
+                    listOf("SYSTEM" to strings.themeSystem, "LIGHT" to strings.themeLight, "DARK" to strings.themeDark).forEach { (mode, label) ->
                         FilterChip(
                             selected = settings.themeMode == mode,
                             onClick = {
@@ -320,6 +348,34 @@ fun SettingsScreen(
                 }
             },
             confirmButton = { TextButton(onClick = { showThemeDialog = false }) { Text(strings.cancel) } }
+        )
+    }
+
+    if (showCalendarDialog) {
+        AlertDialog(
+            onDismissRequest = { showCalendarDialog = false },
+            title = { Text(featureStrings.calendarTitle) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilterChip(
+                        selected = settings.calendarMode != DateFormatter.CALENDAR_ETHIOPIAN,
+                        onClick = {
+                            onUpdateSettings(settings.copy(calendarMode = DateFormatter.CALENDAR_GREGORIAN))
+                            showCalendarDialog = false
+                        },
+                        label = { Text(featureStrings.gregorianCalendar) }
+                    )
+                    FilterChip(
+                        selected = settings.calendarMode == DateFormatter.CALENDAR_ETHIOPIAN,
+                        onClick = {
+                            onUpdateSettings(settings.copy(calendarMode = DateFormatter.CALENDAR_ETHIOPIAN))
+                            showCalendarDialog = false
+                        },
+                        label = { Text(featureStrings.ethiopianCalendar) }
+                    )
+                }
+            },
+            confirmButton = { TextButton(onClick = { showCalendarDialog = false }) { Text(strings.cancel) } }
         )
     }
 
@@ -457,9 +513,9 @@ private fun SettingsRow(
 }
 
 private fun privacyBody(language: AppLanguage): String = when (language) {
-    AppLanguage.ARABIC -> "يعمل DeynBook محليًا على جهازك. لا نرسل أسماء العملاء أو أرقام الهواتف أو المبالغ أو العمليات إلى خادم، ولا نستخدم التحليلات أو الإعلانات في الإصدار 1.0. النسخ الاحتياطية وملفات PDF لا تغادر جهازك إلا عندما تختار أنت مشاركتها. التطبيق أداة لتسجيل الديون وليس بنكًا ولا يقدم قروضًا أو تحويلات مالية."
-    AppLanguage.SOMALI -> "DeynBook wuxuu xogta ku hayaa qalabkaaga. Magacyada, lambarrada telefoonka, lacagaha iyo dhaqdhaqaaqyada looma diro server, mana isticmaalno xayeysiis ama analytics nooca 1.0. Backup iyo PDF waxay ka baxaan qalabka oo keliya marka adigu wadaagto. App-ku waa buug deyn, ma aha bangi mana bixiyo amaah ama xawaalad."
-    AppLanguage.AMHARIC -> "DeynBook መረጃዎን በመሣሪያዎ ላይ ብቻ ያስቀምጣል። ስሞች፣ ስልክ ቁጥሮች፣ መጠኖች እና ግብይቶች ወደ ሰርቨር አይላኩም። በ1.0 ማስታወቂያ ወይም analytics የለም። Backup እና PDF እርስዎ ሲያጋሩ ብቻ ከመሣሪያው ይወጣሉ። መተግበሪያው የዕዳ መዝገብ ነው፣ ባንክ አይደለም እና ብድር ወይም ገንዘብ ማስተላለፍ አያቀርብም።"
-    AppLanguage.FRENCH -> "DeynBook conserve les données localement sur votre appareil. Les noms, numéros de téléphone, montants et opérations ne sont envoyés à aucun serveur. La version 1.0 n'utilise ni publicité ni analytics. Les sauvegardes et PDF ne quittent l'appareil que lorsque vous choisissez de les partager. DeynBook est un registre de dettes, pas une banque, et ne fournit ni prêt ni transfert d'argent."
-    AppLanguage.ENGLISH -> "DeynBook stores data locally on your device. Names, phone numbers, amounts and transactions are not sent to a server. Version 1.0 uses no ads or analytics. Backups and PDFs leave the device only when you choose to share them. DeynBook is a debt-recording tool, not a bank, and it does not provide loans or money transfers."
+    AppLanguage.ARABIC -> "يعمل DeynBook محليًا على جهازك. لا نرسل أسماء العملاء أو أرقام الهواتف أو المبالغ أو العمليات إلى خادم، ولا نستخدم التحليلات أو الإعلانات. المرفقات تحفظ داخل مساحة التطبيق الخاصة. النسخ الاحتياطية وملفات PDF لا تغادر جهازك إلا عندما تختار أنت مشاركتها. التطبيق أداة لتسجيل الديون وليس بنكًا ولا يقدم قروضًا أو تحويلات مالية."
+    AppLanguage.SOMALI -> "DeynBook wuxuu xogta ku hayaa qalabkaaga. Magacyada, lambarrada telefoonka, lacagaha iyo dhaqdhaqaaqyada looma diro server. Lifaaqyada waxaa lagu kaydiyaa gudaha app-ka. Backup iyo PDF waxay ka baxaan qalabka oo keliya marka adigu wadaagto. App-ku waa buug deyn, ma aha bangi mana bixiyo amaah ama xawaalad."
+    AppLanguage.AMHARIC -> "DeynBook መረጃዎን በመሣሪያዎ ላይ ብቻ ያስቀምጣል። ስሞች፣ ስልክ ቁጥሮች፣ መጠኖች እና ግብይቶች ወደ ሰርቨር አይላኩም። አባሪዎች በመተግበሪያው የግል ማከማቻ ውስጥ ይቀመጣሉ። Backup እና PDF እርስዎ ሲያጋሩ ብቻ ከመሣሪያው ይወጣሉ።"
+    AppLanguage.FRENCH -> "DeynBook conserve les données localement sur votre appareil. Les noms, numéros de téléphone, montants et opérations ne sont envoyés à aucun serveur. Les pièces jointes restent dans l’espace privé de l’application. Les sauvegardes et PDF ne quittent l’appareil que lorsque vous choisissez de les partager."
+    AppLanguage.ENGLISH -> "DeynBook stores data locally on your device. Names, phone numbers, amounts and transactions are not sent to a server. Attachments are kept in the app's private storage. Backups and PDFs leave the device only when you choose to share them. DeynBook is a debt-recording tool, not a bank."
 }
