@@ -3,32 +3,25 @@ package com.example.core.formatting
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.TimeZone
 
 object DateFormatter {
-    private val dateOnlyFormat = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())
-    private val dateTimeFormat = SimpleDateFormat("dd/MM/yyyy hh:mm a", Locale.getDefault())
-    private val timeOnlyFormat = SimpleDateFormat("hh:mm a", Locale.getDefault())
-    private val isoFileDateFormat = SimpleDateFormat("yyyy-MM-dd", Locale.US)
-    private val fullIsoFormat = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US)
+    fun formatDate(timestamp: Long): String =
+        SimpleDateFormat("dd/MM/yyyy", Locale.getDefault()).format(Date(timestamp))
 
-    fun formatDate(timestamp: Long): String {
-        return dateOnlyFormat.format(Date(timestamp))
-    }
+    fun formatDateTime(timestamp: Long): String =
+        SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault()).format(Date(timestamp))
 
-    fun formatDateTime(timestamp: Long): String {
-        return dateTimeFormat.format(Date(timestamp))
-    }
+    fun formatTime(timestamp: Long): String =
+        SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(timestamp))
 
-    fun formatTime(timestamp: Long): String {
-        return timeOnlyFormat.format(Date(timestamp))
-    }
-
-    fun formatForFileName(timestamp: Long): String {
-        return isoFileDateFormat.format(Date(timestamp))
-    }
+    fun formatForFileName(timestamp: Long): String =
+        SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date(timestamp))
 
     fun formatIsoUtc(timestamp: Long): String {
-        return fullIsoFormat.format(Date(timestamp))
+        return SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).apply {
+            timeZone = TimeZone.getTimeZone("UTC")
+        }.format(Date(timestamp))
     }
 
     fun startOfDay(timestamp: Long): Long {
