@@ -35,20 +35,27 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.example.core.formatting.AmountFormatter
 import com.example.core.formatting.DateFormatter
 import com.example.core.localization.AppLanguage
 import com.example.core.localization.DeynBookLocalizationProvider
+import com.example.core.localization.FeatureStringsProvider
 import com.example.core.localization.LocalStrings
 import com.example.data.local.entities.LedgerTransactionEntity
 import com.example.data.local.entities.PartyEntity
+import com.example.data.models.CollectionItem
+import com.example.data.models.CollectionStatus
 import com.example.data.models.TransactionType
+import com.example.services.AttachmentService
 import com.example.services.ShareHelper
+import com.example.ui.collection.CollectionCenterScreen
 import com.example.ui.home.HomeScreen
 import com.example.ui.onboarding.OnboardingScreen
 import com.example.ui.parties.AddEditPartyDialog
 import com.example.ui.parties.PartiesScreen
 import com.example.ui.parties.PartyDetailScreen
 import com.example.ui.reports.ReportsScreen
+import com.example.ui.security.BiometricGate
 import com.example.ui.settings.SettingsScreen
 import com.example.ui.theme.DeynBookTheme
 import com.example.ui.transactions.AddEditTransactionDialog
@@ -111,6 +118,8 @@ fun DeynBookApp(viewModel: MainViewModel = viewModel()) {
 
     var selectedTab by remember { mutableIntStateOf(0) }
     var activePartyId by remember { mutableStateOf<String?>(null) }
+    var showCollectionCenter by remember { mutableStateOf(false) }
+    var collectionItems by remember { mutableStateOf<List<CollectionItem>>(emptyList()) }
 
     var showPartyDialog by remember { mutableStateOf(false) }
     var partyToEdit by remember { mutableStateOf<PartyEntity?>(null) }
@@ -125,6 +134,14 @@ fun DeynBookApp(viewModel: MainViewModel = viewModel()) {
         settings?.defaultCurrencyCode?.let(viewModel::setSelectedCurrencyCode)
     }
 
+    LaunchedEffect(settings?.calendarMode) {
+        DateFormatter.setCalendarMode(settings?.calendarMode ?: DateFormatter.CALENDAR_GREGORIAN)
+    }
+
+    LaunchedEffect(partiesWithBalances) {
+        collectionItems = viewModel.loadCollectionItems()
+    }
+
     LaunchedEffect(userMessage) {
         userMessage?.let {
             snackbarHostState.showSnackbar(it)
@@ -134,6 +151,7 @@ fun DeynBookApp(viewModel: MainViewModel = viewModel()) {
 
     DeynBookLocalizationProvider(language = currentLanguage) {
         val strings = LocalStrings.current
+        val featureStrings = FeatureStringsProvider.get(currentLanguage)
         DeynBookTheme(themeMode = settings?.themeMode ?: "SYSTEM") {
             if (settings?.onboardingCompleted != true) {
                 OnboardingScreen(
@@ -147,271 +165,352 @@ fun DeynBookApp(viewModel: MainViewModel = viewModel()) {
                 return@DeynBookTheme
             }
 
-            val showMainNavigation = activePartyId == null
-            Scaffold(
-                snackbarHost = { SnackbarHost(snackbarHostState) },
-                bottomBar = {
-                    if (showMainNavigation) {
-                        NavigationBar {
-                            val tabs = listOf(
-                                Triple(Icons.Default.Home, strings.navHome, 0),
-                                Triple(Icons.Default.People, strings.navParties, 1),
-                                Triple(Icons.Default.Assessment, strings.navReports, 2),
-                                Triple(Icons.Default.Settings, strings.navMore, 3)
-                            )
-                            tabs.forEach { (icon, label, index) ->
-                                NavigationBarItem(
-                                    selected = selectedTab == index,
-                                    onClick = { selectedTab = index },
-                                    icon = { Icon(icon, contentDescription = label) },
-                                    label = { Text(label) }
+            BiometricGate(
+                enabled = settings?.biometricLockEnabled == true,
+                language = currentLanguage
+            ) {
+                val showMainNavigation = activePartyId == null && !showCollectionCenter
+                Scaffold(
+                    snackbarHost = { SnackbarHost(snackbarHostState) },
+                    bottomBar = {
+                        if (showMainNavigation) {
+                            NavigationBar {
+                                val tabs = listOf(
+                                    Triple(Icons.Default.Home, strings.navHome, 0),
+                                    Triple(Icons.Default.People, strings.navParties, 1),
+                                    Triple(Icons.Default.Assessment, strings.navReports, 2),
+                                    Triple(Icons.Default.Settings, strings.navMore, 3)
                                 )
+                                tabs.forEach { (icon, label, index) ->
+                                    NavigationBarItem(
+                                        selected = selectedTab == index,
+                                        onClick = { selectedTab = index },
+                                        icon = { Icon(icon, contentDescription = label) },
+                                        label = { Text(label) }
+                                    )
+                                }
                             }
                         }
-                    }
-                },
-                floatingActionButton = {
-                    if (showMainNavigation && selectedTab == 0) {
-                        ExtendedFloatingActionButton(
-                            onClick = {
-                                transactionToEdit = null
-                                preselectedTransactionType = null
-                                preselectedPartyId = null
-                                showTransactionDialog = true
-                            },
-                            icon = { Icon(Icons.Default.Add, contentDescription = null) },
-                            text = { Text(strings.addTransaction) }
-                        )
-                    }
-                }
-            ) { paddingValues ->
-                Box(Modifier.fillMaxSize().padding(paddingValues)) {
-                    val detailId = activePartyId
-                    if (detailId != null) {
-                        val partyWithBalances = partiesWithBalances.find { it.party.id == detailId }
-                        if (partyWithBalances == null) {
-                            LaunchedEffect(detailId) { activePartyId = null }
-                        } else {
-                            val transactions by viewModel.repository
-                                .getTransactionsForPartyFlow(detailId)
-                                .collectAsState(initial = emptyList())
-
-                            PartyDetailScreen(
-                                partyWithBalances = partyWithBalances,
-                                transactions = transactions,
-                                onBack = { activePartyId = null },
-                                onEditParty = {
-                                    partyToEdit = partyWithBalances.party
-                                    showPartyDialog = true
-                                },
-                                onArchiveParty = { viewModel.setPartyArchived(detailId, it) },
-                                onDeleteParty = {
-                                    viewModel.deleteParty(
-                                        partyId = detailId,
-                                        onSuccess = { activePartyId = null },
-                                        onError = {
-                                            scope.launch { snackbarHostState.showSnackbar(strings.cannotDeletePartyWithTx) }
-                                        }
-                                    )
-                                },
-                                onCallParty = { ShareHelper.dialPhoneNumber(context, it) },
-                                onShareStatementPdf = { currency, accountType ->
-                                    viewModel.shareStatementPdf(detailId, currency, accountType, currentLanguage)
-                                },
-                                onShareImageCard = { currency, accountType ->
-                                    viewModel.shareImageCard(detailId, currency, accountType, currentLanguage)
-                                },
-                                onShareTextSummary = { currency, accountType ->
-                                    viewModel.shareTextSummary(detailId, currency, accountType, currentLanguage)
-                                },
-                                onAddTransaction = { type ->
+                    },
+                    floatingActionButton = {
+                        if (showMainNavigation && selectedTab == 0) {
+                            ExtendedFloatingActionButton(
+                                onClick = {
                                     transactionToEdit = null
-                                    preselectedTransactionType = type
-                                    preselectedPartyId = detailId
-                                    showTransactionDialog = true
-                                },
-                                onEditTransaction = { tx ->
-                                    transactionToEdit = tx
                                     preselectedTransactionType = null
-                                    preselectedPartyId = tx.partyId
-                                    showTransactionDialog = true
-                                },
-                                onDeleteTransaction = { viewModel.deleteTransaction(it.id) }
-                            )
-                        }
-                    } else {
-                        when (selectedTab) {
-                            0 -> HomeScreen(
-                                businessName = settings?.businessName.orEmpty(),
-                                selectedCurrencyCode = selectedCurrencyCode,
-                                currencies = enabledCurrencies.ifEmpty { allCurrencies },
-                                summary = dashboardSummary,
-                                recentTransactions = recentTransactions,
-                                onSelectCurrency = viewModel::setSelectedCurrencyCode,
-                                onQuickAction = { type ->
-                                    transactionToEdit = null
-                                    preselectedTransactionType = type
                                     preselectedPartyId = null
                                     showTransactionDialog = true
                                 },
-                                onTransactionClick = { tx ->
-                                    transactionToEdit = tx
-                                    preselectedPartyId = tx.partyId
-                                    showTransactionDialog = true
-                                },
-                                onNavigateToParties = { selectedTab = 1 },
-                                onSearchClick = { selectedTab = 1 }
+                                icon = { Icon(Icons.Default.Add, contentDescription = null) },
+                                text = { Text(strings.addTransaction) }
                             )
-
-                            1 -> PartiesScreen(
-                                parties = partiesWithBalances,
-                                onPartyClick = { activePartyId = it },
-                                onAddPartyClick = {
-                                    partyToEdit = null
-                                    reopenTransactionAfterParty = false
-                                    showPartyDialog = true
-                                }
-                            )
-
-                            2 -> ReportsScreen(
-                                defaultCurrencyCode = selectedCurrencyCode,
-                                currencies = enabledCurrencies.ifEmpty { allCurrencies },
-                                parties = partiesWithBalances,
-                                onLoadReport = { currency, from, to, partyId ->
-                                    viewModel.loadReportSummary(currency, from, to, partyId)
-                                },
-                                onExportCsv = ::requestCsvDestination
-                            )
-
-                            else -> settings?.let { currentSettings ->
-                                SettingsScreen(
-                                    settings = currentSettings,
-                                    currencies = allCurrencies,
-                                    currentLanguage = currentLanguage,
-                                    onUpdateSettings = viewModel::updateSettings,
-                                    onLanguageChange = viewModel::setLanguage,
-                                    onToggleCurrency = viewModel::toggleCurrency,
-                                    onAddCustomCurrency = viewModel::addCustomCurrency,
-                                    onExportBackup = ::requestBackupDestination,
-                                    onImportBackupFile = viewModel::parseBackupFromUri,
-                                    onExportCsv = { requestCsvDestination(Long.MIN_VALUE, Long.MAX_VALUE) },
-                                    onResetAllData = viewModel::resetAllData
+                        }
+                    }
+                ) { paddingValues ->
+                    Box(Modifier.fillMaxSize().padding(paddingValues)) {
+                        when {
+                            showCollectionCenter -> {
+                                CollectionCenterScreen(
+                                    items = collectionItems,
+                                    onBack = { showCollectionCenter = false },
+                                    onOpenParty = { item ->
+                                        showCollectionCenter = false
+                                        activePartyId = item.party.id
+                                    },
+                                    onWhatsAppReminder = { item ->
+                                        val amount = AmountFormatter.formatAmount(
+                                            item.outstandingAmountMinor,
+                                            item.decimalPlaces,
+                                            item.currencyCode
+                                        )
+                                        val message = featureStrings.reminderMessage(
+                                            item.party.name,
+                                            amount,
+                                            DateFormatter.formatDate(item.dueAt)
+                                        )
+                                        ShareHelper.openWhatsAppReminder(context, item.party.phone, message)
+                                    },
+                                    onRecordPayment = { item ->
+                                        transactionToEdit = null
+                                        preselectedTransactionType = TransactionType.CUSTOMER_PAYMENT
+                                        preselectedPartyId = item.party.id
+                                        showTransactionDialog = true
+                                    }
                                 )
+                            }
+
+                            activePartyId != null -> {
+                                val detailId = activePartyId!!
+                                val partyWithBalances = partiesWithBalances.find { it.party.id == detailId }
+                                if (partyWithBalances == null) {
+                                    LaunchedEffect(detailId) { activePartyId = null }
+                                } else {
+                                    val transactions by viewModel.repository
+                                        .getTransactionsForPartyFlow(detailId)
+                                        .collectAsState(initial = emptyList())
+
+                                    PartyDetailScreen(
+                                        partyWithBalances = partyWithBalances,
+                                        transactions = transactions,
+                                        onBack = { activePartyId = null },
+                                        onEditParty = {
+                                            partyToEdit = partyWithBalances.party
+                                            showPartyDialog = true
+                                        },
+                                        onArchiveParty = { viewModel.setPartyArchived(detailId, it) },
+                                        onDeleteParty = {
+                                            viewModel.deleteParty(
+                                                partyId = detailId,
+                                                onSuccess = { activePartyId = null },
+                                                onError = {
+                                                    scope.launch { snackbarHostState.showSnackbar(strings.cannotDeletePartyWithTx) }
+                                                }
+                                            )
+                                        },
+                                        onCallParty = { ShareHelper.dialPhoneNumber(context, it) },
+                                        onShareStatementPdf = { currency, accountType ->
+                                            viewModel.shareStatementPdf(detailId, currency, accountType, currentLanguage)
+                                        },
+                                        onShareImageCard = { currency, accountType ->
+                                            viewModel.shareImageCard(detailId, currency, accountType, currentLanguage)
+                                        },
+                                        onShareTextSummary = { currency, accountType ->
+                                            viewModel.shareTextSummary(detailId, currency, accountType, currentLanguage)
+                                        },
+                                        onAddTransaction = { type ->
+                                            transactionToEdit = null
+                                            preselectedTransactionType = type
+                                            preselectedPartyId = detailId
+                                            showTransactionDialog = true
+                                        },
+                                        onQuickSettle = { type, amount, currency, decimals ->
+                                            viewModel.addTransaction(
+                                                partyId = detailId,
+                                                type = type,
+                                                amountMinor = amount,
+                                                currencyCode = currency,
+                                                currencyDecimalPlaces = decimals,
+                                                occurredAt = System.currentTimeMillis(),
+                                                note = featureStrings.fullSettlementNote
+                                            )
+                                        },
+                                        onOpenAttachment = { tx -> AttachmentService.open(context, tx.attachmentPath) },
+                                        onEditTransaction = { tx ->
+                                            transactionToEdit = tx
+                                            preselectedTransactionType = null
+                                            preselectedPartyId = tx.partyId
+                                            showTransactionDialog = true
+                                        },
+                                        onDeleteTransaction = { tx ->
+                                            AttachmentService.deletePath(tx.attachmentPath)
+                                            viewModel.deleteTransaction(tx.id)
+                                        }
+                                    )
+                                }
+                            }
+
+                            else -> {
+                                when (selectedTab) {
+                                    0 -> HomeScreen(
+                                        businessName = settings?.businessName.orEmpty(),
+                                        selectedCurrencyCode = selectedCurrencyCode,
+                                        currencies = enabledCurrencies.ifEmpty { allCurrencies },
+                                        summary = dashboardSummary,
+                                        recentTransactions = recentTransactions,
+                                        overdueCount = collectionItems.count { it.status == CollectionStatus.OVERDUE },
+                                        onSelectCurrency = viewModel::setSelectedCurrencyCode,
+                                        onQuickAction = { type ->
+                                            transactionToEdit = null
+                                            preselectedTransactionType = type
+                                            preselectedPartyId = null
+                                            showTransactionDialog = true
+                                        },
+                                        onTransactionClick = { tx ->
+                                            transactionToEdit = tx
+                                            preselectedPartyId = tx.partyId
+                                            showTransactionDialog = true
+                                        },
+                                        onNavigateToParties = { selectedTab = 1 },
+                                        onOpenCollectionCenter = { showCollectionCenter = true },
+                                        onSearchClick = { selectedTab = 1 }
+                                    )
+
+                                    1 -> PartiesScreen(
+                                        parties = partiesWithBalances,
+                                        onPartyClick = { activePartyId = it },
+                                        onAddPartyClick = {
+                                            partyToEdit = null
+                                            reopenTransactionAfterParty = false
+                                            showPartyDialog = true
+                                        }
+                                    )
+
+                                    2 -> ReportsScreen(
+                                        defaultCurrencyCode = selectedCurrencyCode,
+                                        currencies = enabledCurrencies.ifEmpty { allCurrencies },
+                                        parties = partiesWithBalances,
+                                        onLoadReport = { currency, from, to, partyId ->
+                                            viewModel.loadReportSummary(currency, from, to, partyId)
+                                        },
+                                        onExportCsv = ::requestCsvDestination
+                                    )
+
+                                    else -> settings?.let { currentSettings ->
+                                        SettingsScreen(
+                                            settings = currentSettings,
+                                            currencies = allCurrencies,
+                                            currentLanguage = currentLanguage,
+                                            onUpdateSettings = viewModel::updateSettings,
+                                            onLanguageChange = viewModel::setLanguage,
+                                            onToggleCurrency = viewModel::toggleCurrency,
+                                            onAddCustomCurrency = viewModel::addCustomCurrency,
+                                            onExportBackup = ::requestBackupDestination,
+                                            onImportBackupFile = viewModel::parseBackupFromUri,
+                                            onExportCsv = { requestCsvDestination(Long.MIN_VALUE, Long.MAX_VALUE) },
+                                            onResetAllData = {
+                                                AttachmentService.clearAll(context)
+                                                viewModel.resetAllData()
+                                            }
+                                        )
+                                    }
+                                }
                             }
                         }
                     }
                 }
-            }
 
-            if (showPartyDialog) {
-                AddEditPartyDialog(
-                    initialParty = partyToEdit,
-                    defaultCurrencyCode = selectedCurrencyCode,
-                    currencies = enabledCurrencies.ifEmpty { allCurrencies },
-                    onDismiss = {
-                        showPartyDialog = false
-                        partyToEdit = null
-                        reopenTransactionAfterParty = false
-                    },
-                    onSearchSimilar = viewModel::searchSimilarParties,
-                    onSave = { name, phone, type, notes, openingType, openingAmount, currency, decimals, openingOccurredAt ->
-                        val editing = partyToEdit
-                        if (editing != null) {
-                            viewModel.updateParty(
-                                editing.copy(
-                                    name = name,
-                                    normalizedName = name.trim().lowercase(),
-                                    phone = phone,
-                                    partyType = type.value,
-                                    notes = notes
-                                )
-                            )
+                if (showPartyDialog) {
+                    AddEditPartyDialog(
+                        initialParty = partyToEdit,
+                        defaultCurrencyCode = selectedCurrencyCode,
+                        currencies = enabledCurrencies.ifEmpty { allCurrencies },
+                        onDismiss = {
                             showPartyDialog = false
                             partyToEdit = null
-                        } else {
-                            viewModel.createPartyWithCallback(
-                                name,
-                                phone,
-                                type,
-                                notes,
-                                openingType,
-                                openingAmount,
-                                currency,
-                                decimals,
-                                openingOccurredAt
-                            ) { newPartyId ->
+                            reopenTransactionAfterParty = false
+                        },
+                        onSearchSimilar = viewModel::searchSimilarParties,
+                        onSave = { name, phone, type, notes, openingType, openingAmount, currency, decimals, openingOccurredAt ->
+                            val editing = partyToEdit
+                            if (editing != null) {
+                                viewModel.updateParty(
+                                    editing.copy(
+                                        name = name,
+                                        normalizedName = name.trim().lowercase(),
+                                        phone = phone,
+                                        partyType = type.value,
+                                        notes = notes
+                                    )
+                                )
                                 showPartyDialog = false
                                 partyToEdit = null
-                                if (reopenTransactionAfterParty) {
-                                    preselectedPartyId = newPartyId
-                                    reopenTransactionAfterParty = false
-                                    showTransactionDialog = true
+                            } else {
+                                viewModel.createPartyWithCallback(
+                                    name,
+                                    phone,
+                                    type,
+                                    notes,
+                                    openingType,
+                                    openingAmount,
+                                    currency,
+                                    decimals,
+                                    openingOccurredAt
+                                ) { newPartyId ->
+                                    showPartyDialog = false
+                                    partyToEdit = null
+                                    if (reopenTransactionAfterParty) {
+                                        preselectedPartyId = newPartyId
+                                        reopenTransactionAfterParty = false
+                                        showTransactionDialog = true
+                                    }
                                 }
                             }
                         }
-                    }
-                )
-            }
+                    )
+                }
 
-            if (showTransactionDialog) {
-                AddEditTransactionDialog(
-                    initialTransaction = transactionToEdit,
-                    preselectedType = preselectedTransactionType,
-                    preselectedPartyId = preselectedPartyId,
-                    defaultCurrencyCode = selectedCurrencyCode,
-                    partiesWithBalances = partiesWithBalances,
-                    currencies = enabledCurrencies.ifEmpty { allCurrencies },
-                    onDismiss = {
-                        showTransactionDialog = false
-                        transactionToEdit = null
-                        preselectedTransactionType = null
-                        preselectedPartyId = null
-                    },
-                    onOpenAddParty = {
-                        showTransactionDialog = false
-                        reopenTransactionAfterParty = true
-                        partyToEdit = null
-                        showPartyDialog = true
-                    },
-                    onSaveTransaction = { partyId, type, amount, currency, decimals, occurredAt, note ->
-                        val existing = transactionToEdit
-                        if (existing == null) {
-                            viewModel.addTransaction(partyId, type, amount, currency, decimals, occurredAt, note)
-                        } else {
-                            viewModel.updateTransaction(existing.id, partyId, type, amount, currency, decimals, occurredAt, note)
+                if (showTransactionDialog) {
+                    AddEditTransactionDialog(
+                        initialTransaction = transactionToEdit,
+                        preselectedType = preselectedTransactionType,
+                        preselectedPartyId = preselectedPartyId,
+                        defaultCurrencyCode = selectedCurrencyCode,
+                        partiesWithBalances = partiesWithBalances,
+                        currencies = enabledCurrencies.ifEmpty { allCurrencies },
+                        onDismiss = {
+                            showTransactionDialog = false
+                            transactionToEdit = null
+                            preselectedTransactionType = null
+                            preselectedPartyId = null
+                        },
+                        onOpenAddParty = {
+                            showTransactionDialog = false
+                            reopenTransactionAfterParty = true
+                            partyToEdit = null
+                            showPartyDialog = true
+                        },
+                        onSaveTransaction = { partyId, type, amount, currency, decimals, occurredAt, note, dueAt, attachmentUri, removeAttachment ->
+                            val existing = transactionToEdit
+                            if (existing == null) {
+                                viewModel.addTransactionWithExtras(
+                                    partyId = partyId,
+                                    type = type,
+                                    amountMinor = amount,
+                                    currencyCode = currency,
+                                    currencyDecimalPlaces = decimals,
+                                    occurredAt = occurredAt,
+                                    note = note,
+                                    dueAt = dueAt,
+                                    attachmentUri = attachmentUri
+                                )
+                            } else {
+                                viewModel.updateTransactionWithExtras(
+                                    id = existing.id,
+                                    partyId = partyId,
+                                    type = type,
+                                    amountMinor = amount,
+                                    currencyCode = currency,
+                                    currencyDecimalPlaces = decimals,
+                                    occurredAt = occurredAt,
+                                    note = note,
+                                    dueAt = dueAt,
+                                    attachmentUri = attachmentUri,
+                                    removeAttachment = removeAttachment
+                                )
+                            }
+                            showTransactionDialog = false
+                            transactionToEdit = null
+                            preselectedTransactionType = null
+                            preselectedPartyId = null
                         }
-                        showTransactionDialog = false
-                        transactionToEdit = null
-                        preselectedTransactionType = null
-                        preselectedPartyId = null
-                    }
-                )
-            }
+                    )
+                }
 
-            pendingRestoreBackup?.let { backup ->
-                AlertDialog(
-                    onDismissRequest = viewModel::cancelRestoreBackup,
-                    title = {
-                        Icon(Icons.Default.Warning, contentDescription = null)
-                        Text(strings.restorePreviewTitle)
-                    },
-                    text = {
-                        Text(
-                            "${strings.restoreWarningMessage}\n" +
-                                "${strings.lastBackupDate} ${DateFormatter.formatDateTime(backup.exportedAt)}\n" +
-                                "${strings.partiesTitle}: ${backup.parties.size}\n" +
-                                "${strings.totalTxCount}: ${backup.transactions.size}"
-                        )
-                    },
-                    confirmButton = {
-                        Button(onClick = { viewModel.confirmRestoreBackup(backup) }) {
-                            Text(strings.restoreBackup)
+                pendingRestoreBackup?.let { backup ->
+                    AlertDialog(
+                        onDismissRequest = viewModel::cancelRestoreBackup,
+                        title = {
+                            Icon(Icons.Default.Warning, contentDescription = null)
+                            Text(strings.restorePreviewTitle)
+                        },
+                        text = {
+                            Text(
+                                "${strings.restoreWarningMessage}\n" +
+                                    "${strings.lastBackupDate} ${DateFormatter.formatDateTime(backup.exportedAt)}\n" +
+                                    "${strings.partiesTitle}: ${backup.parties.size}\n" +
+                                    "${strings.totalTxCount}: ${backup.transactions.size}"
+                            )
+                        },
+                        confirmButton = {
+                            Button(onClick = { viewModel.confirmRestoreBackup(backup) }) {
+                                Text(strings.restoreBackup)
+                            }
+                        },
+                        dismissButton = {
+                            TextButton(onClick = viewModel::cancelRestoreBackup) { Text(strings.cancel) }
                         }
-                    },
-                    dismissButton = {
-                        TextButton(onClick = viewModel::cancelRestoreBackup) { Text(strings.cancel) }
-                    }
-                )
+                    )
+                }
             }
         }
     }

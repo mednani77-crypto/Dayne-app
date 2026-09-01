@@ -1,7 +1,6 @@
 package com.example.ui.parties
 
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -23,7 +22,9 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Archive
 import androidx.compose.material.icons.filled.ArrowDownward
 import androidx.compose.material.icons.filled.ArrowUpward
+import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Call
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.MoreVert
@@ -63,6 +64,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.example.core.formatting.AmountFormatter
 import com.example.core.formatting.DateFormatter
+import com.example.core.localization.FeatureStringsProvider
+import com.example.core.localization.LocalLanguage
 import com.example.core.localization.LocalStrings
 import com.example.data.local.entities.LedgerTransactionEntity
 import com.example.data.models.PartyType
@@ -85,10 +88,13 @@ fun PartyDetailScreen(
     onShareImageCard: (currencyCode: String, accountType: StatementAccountType) -> Unit,
     onShareTextSummary: (currencyCode: String, accountType: StatementAccountType) -> Unit,
     onAddTransaction: (TransactionType) -> Unit,
+    onQuickSettle: (type: TransactionType, amountMinor: Long, currencyCode: String, decimalPlaces: Int) -> Unit,
+    onOpenAttachment: (LedgerTransactionEntity) -> Unit,
     onEditTransaction: (LedgerTransactionEntity) -> Unit,
     onDeleteTransaction: (LedgerTransactionEntity) -> Unit
 ) {
     val strings = LocalStrings.current
+    val featureStrings = FeatureStringsProvider.get(LocalLanguage.current)
     val party = partyWithBalances.party
     val partyType = PartyType.from(party.partyType)
     val supportsCustomer = partyType == PartyType.CUSTOMER || partyType == PartyType.BOTH
@@ -143,80 +149,43 @@ fun PartyDetailScreen(
                         IconButton(onClick = { shareMenuExpanded = true }) {
                             Icon(Icons.Default.Share, contentDescription = strings.shareStatement)
                         }
-                        DropdownMenu(
-                            expanded = shareMenuExpanded,
-                            onDismissRequest = { shareMenuExpanded = false }
-                        ) {
+                        DropdownMenu(expanded = shareMenuExpanded, onDismissRequest = { shareMenuExpanded = false }) {
                             if (supportsCustomer) {
                                 ShareItems(
                                     accountLabel = strings.typeCustomer,
-                                    onPdf = {
-                                        shareMenuExpanded = false
-                                        onShareStatementPdf(selectedCurrencyCode, StatementAccountType.CUSTOMER)
-                                    },
-                                    onImage = {
-                                        shareMenuExpanded = false
-                                        onShareImageCard(selectedCurrencyCode, StatementAccountType.CUSTOMER)
-                                    },
-                                    onText = {
-                                        shareMenuExpanded = false
-                                        onShareTextSummary(selectedCurrencyCode, StatementAccountType.CUSTOMER)
-                                    }
+                                    onPdf = { shareMenuExpanded = false; onShareStatementPdf(selectedCurrencyCode, StatementAccountType.CUSTOMER) },
+                                    onImage = { shareMenuExpanded = false; onShareImageCard(selectedCurrencyCode, StatementAccountType.CUSTOMER) },
+                                    onText = { shareMenuExpanded = false; onShareTextSummary(selectedCurrencyCode, StatementAccountType.CUSTOMER) }
                                 )
                             }
                             if (supportsSupplier) {
                                 ShareItems(
                                     accountLabel = strings.typeSupplier,
-                                    onPdf = {
-                                        shareMenuExpanded = false
-                                        onShareStatementPdf(selectedCurrencyCode, StatementAccountType.SUPPLIER)
-                                    },
-                                    onImage = {
-                                        shareMenuExpanded = false
-                                        onShareImageCard(selectedCurrencyCode, StatementAccountType.SUPPLIER)
-                                    },
-                                    onText = {
-                                        shareMenuExpanded = false
-                                        onShareTextSummary(selectedCurrencyCode, StatementAccountType.SUPPLIER)
-                                    }
+                                    onPdf = { shareMenuExpanded = false; onShareStatementPdf(selectedCurrencyCode, StatementAccountType.SUPPLIER) },
+                                    onImage = { shareMenuExpanded = false; onShareImageCard(selectedCurrencyCode, StatementAccountType.SUPPLIER) },
+                                    onText = { shareMenuExpanded = false; onShareTextSummary(selectedCurrencyCode, StatementAccountType.SUPPLIER) }
                                 )
                             }
                         }
                     }
 
                     Box {
-                        IconButton(onClick = { optionsExpanded = true }) {
-                            Icon(Icons.Default.MoreVert, contentDescription = null)
-                        }
+                        IconButton(onClick = { optionsExpanded = true }) { Icon(Icons.Default.MoreVert, contentDescription = null) }
                         DropdownMenu(expanded = optionsExpanded, onDismissRequest = { optionsExpanded = false }) {
                             DropdownMenuItem(
                                 text = { Text(strings.editParty) },
                                 leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null) },
-                                onClick = {
-                                    optionsExpanded = false
-                                    onEditParty()
-                                }
+                                onClick = { optionsExpanded = false; onEditParty() }
                             )
                             DropdownMenuItem(
                                 text = { Text(if (party.isArchived) strings.unarchiveParty else strings.archiveParty) },
-                                leadingIcon = {
-                                    Icon(
-                                        if (party.isArchived) Icons.Default.Unarchive else Icons.Default.Archive,
-                                        contentDescription = null
-                                    )
-                                },
-                                onClick = {
-                                    optionsExpanded = false
-                                    onArchiveParty(!party.isArchived)
-                                }
+                                leadingIcon = { Icon(if (party.isArchived) Icons.Default.Unarchive else Icons.Default.Archive, contentDescription = null) },
+                                onClick = { optionsExpanded = false; onArchiveParty(!party.isArchived) }
                             )
                             DropdownMenuItem(
                                 text = { Text(strings.deleteParty, color = MaterialTheme.colorScheme.error) },
                                 leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null, tint = MaterialTheme.colorScheme.error) },
-                                onClick = {
-                                    optionsExpanded = false
-                                    showDeletePartyDialog = true
-                                }
+                                onClick = { optionsExpanded = false; showDeletePartyDialog = true }
                             )
                         }
                     }
@@ -225,10 +194,7 @@ fun PartyDetailScreen(
         }
     ) { paddingValues ->
         LazyColumn(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(paddingValues)
-                .padding(horizontal = 16.dp),
+            modifier = Modifier.fillMaxSize().padding(paddingValues).padding(horizontal = 16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             item {
@@ -290,6 +256,27 @@ fun PartyDetailScreen(
                         onSecond = { onAddTransaction(TransactionType.CUSTOMER_PAYMENT) }
                     )
                 }
+                val customerBalance = currentBalance?.customerBalance ?: 0L
+                if (customerBalance > 0L) {
+                    item {
+                        Button(
+                            onClick = {
+                                onQuickSettle(
+                                    TransactionType.CUSTOMER_PAYMENT,
+                                    customerBalance,
+                                    selectedCurrencyCode,
+                                    currentBalance?.decimalPlaces ?: 0
+                                )
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00695C))
+                        ) {
+                            Icon(Icons.Default.CheckCircle, contentDescription = null)
+                            Spacer(Modifier.width(6.dp))
+                            Text(featureStrings.settleFullCustomer)
+                        }
+                    }
+                }
             }
 
             if (supportsSupplier) {
@@ -303,16 +290,33 @@ fun PartyDetailScreen(
                         onSecond = { onAddTransaction(TransactionType.SUPPLIER_PAYMENT) }
                     )
                 }
+                val supplierBalance = currentBalance?.supplierBalance ?: 0L
+                if (supplierBalance > 0L) {
+                    item {
+                        Button(
+                            onClick = {
+                                onQuickSettle(
+                                    TransactionType.SUPPLIER_PAYMENT,
+                                    supplierBalance,
+                                    selectedCurrencyCode,
+                                    currentBalance?.decimalPlaces ?: 0
+                                )
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00695C))
+                        ) {
+                            Icon(Icons.Default.CheckCircle, contentDescription = null)
+                            Spacer(Modifier.width(6.dp))
+                            Text(featureStrings.settleFullSupplier)
+                        }
+                    }
+                }
             }
 
             item {
                 SecondaryTabRow(selectedTabIndex = filterIndex) {
                     listOf(strings.filterAll, strings.filterDebts, strings.filterPayments).forEachIndexed { index, label ->
-                        Tab(
-                            selected = filterIndex == index,
-                            onClick = { filterIndex = index },
-                            text = { Text(label) }
-                        )
+                        Tab(selected = filterIndex == index, onClick = { filterIndex = index }, text = { Text(label) })
                     }
                 }
             }
@@ -324,6 +328,7 @@ fun PartyDetailScreen(
                     TransactionCard(
                         transaction = tx,
                         onClick = { onEditTransaction(tx) },
+                        onOpenAttachment = { onOpenAttachment(tx) },
                         onDelete = { transactionToDelete = tx }
                     )
                 }
@@ -337,23 +342,14 @@ fun PartyDetailScreen(
         AlertDialog(
             onDismissRequest = { transactionToDelete = null },
             title = { Text(strings.confirmDeleteTxTitle, fontWeight = FontWeight.Bold) },
-            text = {
-                Text(
-                    "${strings.confirmDeleteTxMessage}\n${AmountFormatter.formatAmount(tx.amountMinor, tx.currencyDecimalPlaces, tx.currencyCode)}"
-                )
-            },
+            text = { Text("${strings.confirmDeleteTxMessage}\n${AmountFormatter.formatAmount(tx.amountMinor, tx.currencyDecimalPlaces, tx.currencyCode)}") },
             confirmButton = {
                 Button(
-                    onClick = {
-                        transactionToDelete = null
-                        onDeleteTransaction(tx)
-                    },
+                    onClick = { transactionToDelete = null; onDeleteTransaction(tx) },
                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
                 ) { Text(strings.delete) }
             },
-            dismissButton = {
-                TextButton(onClick = { transactionToDelete = null }) { Text(strings.cancel) }
-            }
+            dismissButton = { TextButton(onClick = { transactionToDelete = null }) { Text(strings.cancel) } }
         )
     }
 
@@ -368,18 +364,13 @@ fun PartyDetailScreen(
                     Button(onClick = { showDeletePartyDialog = false }) { Text(strings.cancel) }
                 } else {
                     Button(
-                        onClick = {
-                            showDeletePartyDialog = false
-                            onDeleteParty()
-                        },
+                        onClick = { showDeletePartyDialog = false; onDeleteParty() },
                         colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
                     ) { Text(strings.delete) }
                 }
             },
             dismissButton = {
-                if (!hasTransactions) {
-                    TextButton(onClick = { showDeletePartyDialog = false }) { Text(strings.cancel) }
-                }
+                if (!hasTransactions) TextButton(onClick = { showDeletePartyDialog = false }) { Text(strings.cancel) }
             }
         )
     }
@@ -461,9 +452,11 @@ private fun ActionRow(
 private fun TransactionCard(
     transaction: LedgerTransactionEntity,
     onClick: () -> Unit,
+    onOpenAttachment: () -> Unit,
     onDelete: () -> Unit
 ) {
     val strings = LocalStrings.current
+    val featureStrings = FeatureStringsProvider.get(LocalLanguage.current)
     val type = TransactionType.from(transaction.transactionType)
     val title = when (type) {
         TransactionType.CUSTOMER_DEBT -> strings.quickActionCustomerDebt
@@ -494,7 +487,16 @@ private fun TransactionCard(
                 Column {
                     Text(title, fontWeight = FontWeight.SemiBold)
                     Text(DateFormatter.formatDateTime(transaction.occurredAt), style = MaterialTheme.typography.bodySmall)
+                    transaction.dueAt?.let {
+                        Text("${featureStrings.dueDate}: ${DateFormatter.formatDate(it)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
+                    }
                     transaction.note?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+                    if (!transaction.attachmentPath.isNullOrBlank()) {
+                        TextButton(onClick = onOpenAttachment) {
+                            Icon(Icons.Default.AttachFile, contentDescription = null)
+                            Text(featureStrings.openAttachment, modifier = Modifier.padding(start = 4.dp))
+                        }
+                    }
                 }
             }
             Column(horizontalAlignment = Alignment.End) {
@@ -503,9 +505,7 @@ private fun TransactionCard(
                         AmountFormatter.formatAmount(transaction.amountMinor, transaction.currencyDecimalPlaces, transaction.currencyCode),
                     fontWeight = FontWeight.Bold
                 )
-                IconButton(onClick = onDelete) {
-                    Icon(Icons.Default.Delete, contentDescription = strings.delete)
-                }
+                IconButton(onClick = onDelete) { Icon(Icons.Default.Delete, contentDescription = strings.delete) }
             }
         }
     }

@@ -10,7 +10,7 @@ import org.json.JSONObject
 data class BackupData(
     val schemaVersion: Int = 1,
     val exportedAt: Long = System.currentTimeMillis(),
-    val appVersion: String = "1.0.0",
+    val appVersion: String = "1.1.0",
     val settings: SettingsEntity?,
     val currencies: List<CurrencyEntity>,
     val parties: List<PartyEntity>,
@@ -33,6 +33,8 @@ data class BackupData(
                 put("enabledCurrenciesJson", s.enabledCurrenciesJson)
                 put("themeMode", s.themeMode)
                 put("onboardingCompleted", s.onboardingCompleted)
+                put("biometricLockEnabled", s.biometricLockEnabled)
+                put("calendarMode", s.calendarMode)
             })
         }
 
@@ -76,6 +78,8 @@ data class BackupData(
                     put("currencyDecimalPlaces", t.currencyDecimalPlaces)
                     put("occurredAt", t.occurredAt)
                     put("note", t.note ?: "")
+                    if (t.dueAt != null) put("dueAt", t.dueAt) else put("dueAt", JSONObject.NULL)
+                    put("attachmentPath", t.attachmentPath ?: "")
                     put("createdAt", t.createdAt)
                     put("updatedAt", t.updatedAt)
                 })
@@ -119,6 +123,7 @@ data class BackupData(
         settings?.let { s ->
             require(s.defaultCurrencyCode in currencySet) { "Default currency is missing" }
             require(s.languageCode in setOf("ar", "so", "am", "fr", "en")) { "Invalid language" }
+            require(s.calendarMode in setOf("GREGORIAN", "ETHIOPIAN")) { "Invalid calendar mode" }
         }
     }
 
@@ -141,7 +146,9 @@ data class BackupData(
                     defaultCurrencyCode = obj.optString("defaultCurrencyCode", "DJF"),
                     enabledCurrenciesJson = obj.optString("enabledCurrenciesJson", "[\"DJF\"]"),
                     themeMode = obj.optString("themeMode", "SYSTEM"),
-                    onboardingCompleted = obj.optBoolean("onboardingCompleted", true)
+                    onboardingCompleted = obj.optBoolean("onboardingCompleted", true),
+                    biometricLockEnabled = obj.optBoolean("biometricLockEnabled", false),
+                    calendarMode = obj.optString("calendarMode", "GREGORIAN")
                 )
             } else null
 
@@ -190,6 +197,8 @@ data class BackupData(
                     currencyDecimalPlaces = obj.getInt("currencyDecimalPlaces"),
                     occurredAt = obj.getLong("occurredAt"),
                     note = obj.optString("note").takeIf { it.isNotBlank() },
+                    dueAt = if (obj.has("dueAt") && !obj.isNull("dueAt")) obj.getLong("dueAt") else null,
+                    attachmentPath = obj.optString("attachmentPath").takeIf { it.isNotBlank() },
                     createdAt = obj.getLong("createdAt"),
                     updatedAt = obj.getLong("updatedAt")
                 )

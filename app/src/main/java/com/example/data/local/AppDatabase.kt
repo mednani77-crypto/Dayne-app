@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
+import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 import com.example.data.local.dao.CurrencyDao
 import com.example.data.local.dao.LedgerTransactionDao
@@ -24,7 +25,7 @@ import kotlinx.coroutines.launch
         PartyEntity::class,
         LedgerTransactionEntity::class
     ],
-    version = 1,
+    version = 2,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -38,6 +39,16 @@ abstract class AppDatabase : RoomDatabase() {
         @Volatile
         private var INSTANCE: AppDatabase? = null
 
+        val MIGRATION_1_2 = object : Migration(1, 2) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE ledger_transactions ADD COLUMN dueAt INTEGER")
+                db.execSQL("ALTER TABLE ledger_transactions ADD COLUMN attachmentPath TEXT")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_ledger_transactions_dueAt ON ledger_transactions(dueAt)")
+                db.execSQL("ALTER TABLE settings ADD COLUMN biometricLockEnabled INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE settings ADD COLUMN calendarMode TEXT NOT NULL DEFAULT 'GREGORIAN'")
+            }
+        }
+
         fun getDatabase(context: Context, scope: CoroutineScope = CoroutineScope(Dispatchers.IO)): AppDatabase {
             return INSTANCE ?: synchronized(this) {
                 val instance = Room.databaseBuilder(
@@ -45,6 +56,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "deynbook_database.db"
                 )
+                    .addMigrations(MIGRATION_1_2)
                     .addCallback(DatabaseCallback(scope))
                     // Intentionally no fallbackToDestructiveMigration: future schema changes
                     // must provide explicit Room migrations so user ledger data is never wiped.
@@ -75,7 +87,9 @@ abstract class AppDatabase : RoomDatabase() {
             defaultCurrencyCode = "DJF",
             enabledCurrenciesJson = "[\"DJF\",\"USD\"]",
             themeMode = "SYSTEM",
-            onboardingCompleted = false
+            onboardingCompleted = false,
+            biometricLockEnabled = false,
+            calendarMode = "GREGORIAN"
         )
 
         private class DatabaseCallback(

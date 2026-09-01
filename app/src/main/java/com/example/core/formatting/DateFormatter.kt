@@ -6,11 +6,31 @@ import java.util.Locale
 import java.util.TimeZone
 
 object DateFormatter {
+    const val CALENDAR_GREGORIAN = "GREGORIAN"
+    const val CALENDAR_ETHIOPIAN = "ETHIOPIAN"
+
+    @Volatile
+    private var calendarMode: String = CALENDAR_GREGORIAN
+
+    fun setCalendarMode(mode: String) {
+        calendarMode = if (mode == CALENDAR_ETHIOPIAN) CALENDAR_ETHIOPIAN else CALENDAR_GREGORIAN
+    }
+
+    fun getCalendarMode(): String = calendarMode
+
     fun formatDate(timestamp: Long): String =
-        SimpleDateFormat("dd/MM/yyyy", Locale.getDefault()).format(Date(timestamp))
+        if (calendarMode == CALENDAR_ETHIOPIAN) {
+            EthiopianCalendar.fromTimestamp(timestamp).toString()
+        } else {
+            SimpleDateFormat("dd/MM/yyyy", Locale.getDefault()).format(Date(timestamp))
+        }
 
     fun formatDateTime(timestamp: Long): String =
-        SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault()).format(Date(timestamp))
+        if (calendarMode == CALENDAR_ETHIOPIAN) {
+            "${EthiopianCalendar.fromTimestamp(timestamp)} ${formatTime(timestamp)}"
+        } else {
+            SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault()).format(Date(timestamp))
+        }
 
     fun formatTime(timestamp: Long): String =
         SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(timestamp))

@@ -19,7 +19,8 @@ import androidx.room.PrimaryKey
         Index(value = ["partyId"]),
         Index(value = ["partyId", "currencyCode", "occurredAt"]),
         Index(value = ["occurredAt"]),
-        Index(value = ["transactionType"])
+        Index(value = ["transactionType"]),
+        Index(value = ["dueAt"])
     ]
 )
 data class LedgerTransactionEntity(
@@ -31,6 +32,8 @@ data class LedgerTransactionEntity(
     val currencyDecimalPlaces: Int,
     val occurredAt: Long,
     val note: String? = null,
+    val dueAt: Long? = null,
+    val attachmentPath: String? = null,
     val createdAt: Long = System.currentTimeMillis(),
     val updatedAt: Long = System.currentTimeMillis()
 )

@@ -16,6 +16,8 @@ data class SettingsEntity(
     val themeMode: String = "SYSTEM", // SYSTEM, LIGHT, DARK
     val onboardingCompleted: Boolean = false,
     val lastBackupAt: Long? = null,
+    val biometricLockEnabled: Boolean = false,
+    val calendarMode: String = "GREGORIAN", // GREGORIAN, ETHIOPIAN
     val createdAt: Long = System.currentTimeMillis(),
     val updatedAt: Long = System.currentTimeMillis()
 )
