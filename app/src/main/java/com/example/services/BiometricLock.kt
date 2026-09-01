@@ -2,8 +2,10 @@ package com.example.services
 
 import androidx.biometric.BiometricManager
 import androidx.biometric.BiometricPrompt
+import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentActivity
 import com.example.core.localization.AppLanguage
+import com.example.core.localization.FeatureStrings
 import com.example.core.localization.FeatureStringsProvider
 
 object BiometricLock {
@@ -22,7 +24,7 @@ object BiometricLock {
         val text = FeatureStringsProvider.get(language)
         val prompt = BiometricPrompt(
             activity,
-            activity.mainExecutor,
+            ContextCompat.getMainExecutor(activity),
             object : BiometricPrompt.AuthenticationCallback() {
                 override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
                     super.onAuthenticationSucceeded(result)
@@ -38,13 +40,13 @@ object BiometricLock {
         val info = BiometricPrompt.PromptInfo.Builder()
             .setTitle(text.unlockTitle)
             .setSubtitle(text.unlockSubtitle)
-            .setNegativeButtonText(text.cancelText(language))
+            .setNegativeButtonText(cancelLabel(language))
             .setAllowedAuthenticators(authenticators)
             .build()
         prompt.authenticate(info)
     }
 
-    private fun com.example.core.localization.FeatureStrings.cancelText(language: AppLanguage): String = when (language) {
+    private fun cancelLabel(language: AppLanguage): String = when (language) {
         AppLanguage.ARABIC -> "إلغاء"
         AppLanguage.SOMALI -> "Jooji"
         AppLanguage.AMHARIC -> "ሰርዝ"
