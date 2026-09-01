@@ -17,7 +17,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.AccountBalanceWallet
 import androidx.compose.material.icons.filled.Schedule
-import androidx.compose.material.icons.filled.WhatsApp
+import androidx.compose.material.icons.filled.Send
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -200,7 +200,7 @@ private fun CollectionCard(
                         modifier = Modifier.weight(1f),
                         colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF128C7E))
                     ) {
-                        Icon(Icons.Default.WhatsApp, contentDescription = null)
+                        Icon(Icons.Default.Send, contentDescription = null)
                         Text(strings.remindWhatsApp, modifier = Modifier.padding(start = 5.dp))
                     }
                 }
