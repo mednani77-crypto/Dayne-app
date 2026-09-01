@@ -16,6 +16,7 @@ fun MainViewModel.createPartyWithCallback(
     openingAmountMinor: Long,
     currencyCode: String,
     currencyDecimalPlaces: Int,
+    openingOccurredAt: Long,
     onCreated: (String) -> Unit
 ) {
     viewModelScope.launch {
@@ -28,7 +29,8 @@ fun MainViewModel.createPartyWithCallback(
             openingBalanceType = openingType,
             openingAmountMinor = openingAmountMinor,
             currencyCode = currencyCode,
-            currencyDecimalPlaces = currencyDecimalPlaces
+            currencyDecimalPlaces = currencyDecimalPlaces,
+            occurredAt = openingOccurredAt
         )
         onCreated(id)
     }
