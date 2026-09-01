@@ -39,7 +39,6 @@ import com.example.core.localization.DeynBookLocalizationProvider
 import com.example.core.localization.LocalStrings
 import com.example.data.local.entities.LedgerTransactionEntity
 import com.example.data.local.entities.PartyEntity
-import com.example.data.models.PartyType
 import com.example.data.models.TransactionType
 import com.example.services.ShareHelper
 import com.example.ui.home.HomeScreen
@@ -239,7 +238,10 @@ fun DeynBookApp(viewModel: MainViewModel = viewModel()) {
                             2 -> ReportsScreen(
                                 defaultCurrencyCode = selectedCurrencyCode,
                                 currencies = enabledCurrencies.ifEmpty { allCurrencies },
-                                onLoadReport = viewModel::loadReportSummary,
+                                parties = partiesWithBalances,
+                                onLoadReport = { currency, from, to, partyId ->
+                                    viewModel.loadReportSummary(currency, from, to, partyId)
+                                },
                                 onExportCsv = viewModel::exportCsv
                             )
 
@@ -274,7 +276,7 @@ fun DeynBookApp(viewModel: MainViewModel = viewModel()) {
                         reopenTransactionAfterParty = false
                     },
                     onSearchSimilar = viewModel::searchSimilarParties,
-                    onSave = { name, phone, type, notes, openingType, openingAmount, currency, decimals ->
+                    onSave = { name, phone, type, notes, openingType, openingAmount, currency, decimals, openingOccurredAt ->
                         val editing = partyToEdit
                         if (editing != null) {
                             viewModel.updateParty(
@@ -297,7 +299,8 @@ fun DeynBookApp(viewModel: MainViewModel = viewModel()) {
                                 openingType,
                                 openingAmount,
                                 currency,
-                                decimals
+                                decimals,
+                                openingOccurredAt
                             ) { newPartyId ->
                                 showPartyDialog = false
                                 partyToEdit = null
