@@ -49,6 +49,9 @@ interface LedgerTransactionDao {
     @Update
     suspend fun updateTransaction(transaction: LedgerTransactionEntity)
 
+    @Query("UPDATE ledger_transactions SET dueAt = :dueAt, attachmentPath = :attachmentPath, updatedAt = :updatedAt WHERE id = :id")
+    suspend fun updateExtras(id: String, dueAt: Long?, attachmentPath: String?, updatedAt: Long = System.currentTimeMillis())
+
     @Query("DELETE FROM ledger_transactions WHERE id = :id")
     suspend fun deleteTransactionById(id: String)
 
