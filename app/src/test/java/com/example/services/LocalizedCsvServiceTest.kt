@@ -96,4 +96,21 @@ class LocalizedCsvServiceTest {
 
         assertTrue(csv.contains("inside-reversed"))
     }
+
+    @Test
+    fun reportLanguageIsIndependentFromTranslatedUserContent() {
+        val translatedParty = customer.copy(name = "أحمد")
+        val translatedTx = tx("translated", customer.id, TransactionType.CUSTOMER_DEBT, 2_000L)
+            .copy(note = "سكر وزيت")
+
+        val csv = LocalizedCsvService.generate(
+            transactions = listOf(translatedTx),
+            partiesById = mapOf(translatedParty.id to translatedParty),
+            language = AppLanguage.ARABIC
+        )
+
+        assertTrue(csv.contains("نوع العملية"))
+        assertTrue(csv.contains("أحمد"))
+        assertTrue(csv.contains("سكر وزيت"))
+    }
 }

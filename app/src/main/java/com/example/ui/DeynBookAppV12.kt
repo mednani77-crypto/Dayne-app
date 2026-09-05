@@ -54,7 +54,10 @@ import com.example.data.models.DashboardSummary
 import com.example.data.models.TransactionType
 import com.example.data.repository.DeynBookV12Repository
 import com.example.services.AttachmentService
+import com.example.services.ReportExportOptions
+import com.example.services.ReportExportResult
 import com.example.services.ShareHelper
+import com.example.services.StatementAccountType
 import com.example.services.V12BackupPackage
 import com.example.services.V12BackupService
 import com.example.ui.activity.ActivityScreen
@@ -65,6 +68,8 @@ import com.example.ui.parties.AddEditPartyDialog
 import com.example.ui.parties.PartiesScreen
 import com.example.ui.parties.PartyDetailScreen
 import com.example.ui.reports.ReportsScreen
+import com.example.ui.reports.ReportExportDialog
+import com.example.ui.reports.reportExportResultMessage
 import com.example.ui.security.BiometricGate
 import com.example.ui.settings.LedgerManagerScreen
 import com.example.ui.settings.MoreHubV12
@@ -78,6 +83,17 @@ import kotlinx.coroutines.withContext
 import java.io.File
 
 private const val XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+private enum class ReportExportKind { STATEMENT_PDF, IMAGE_CARD, TEXT_SUMMARY, CSV, EXCEL }
+
+private data class PendingReportExport(
+    val kind: ReportExportKind,
+    val partyId: String? = null,
+    val currencyCode: String? = null,
+    val accountType: StatementAccountType? = null,
+    val fromTime: Long = Long.MIN_VALUE,
+    val toTime: Long = Long.MAX_VALUE
+)
 
 @Composable
 fun DeynBookAppV12(
@@ -136,6 +152,10 @@ fun DeynBookAppV12(
     var pendingSharedUri by remember { mutableStateOf<Uri?>(null) }
     var pendingRestore by remember { mutableStateOf<V12BackupPackage?>(null) }
     var pendingExcelRange by remember { mutableStateOf(Long.MIN_VALUE to Long.MAX_VALUE) }
+    var pendingExcelOptions by remember(currentLanguage) {
+        mutableStateOf(ReportExportOptions(currentLanguage))
+    }
+    var pendingReportExport by remember { mutableStateOf<PendingReportExport?>(null) }
 
     val backupCreateLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("application/json")
@@ -160,10 +180,12 @@ fun DeynBookAppV12(
     ) { uri ->
         if (uri != null) viewModel.exportExcelV12(
             uri,
-            currentLanguage,
+            pendingExcelOptions,
             pendingExcelRange.first,
             pendingExcelRange.second
-        )
+        ) { result ->
+            scope.launch { snackbarHostState.showSnackbar(reportExportResultMessage(currentLanguage, result)) }
+        }
     }
 
     val excelTemplateLauncher = rememberLauncherForActivityResult(
@@ -191,10 +213,11 @@ fun DeynBookAppV12(
     }
 
     fun requestExcelExport(from: Long = Long.MIN_VALUE, to: Long = Long.MAX_VALUE) {
-        pendingExcelRange = from to to
-        val suffix = if (from == Long.MIN_VALUE && to == Long.MAX_VALUE) "all"
-        else "${DateFormatter.formatForFileName(from)}_to_${DateFormatter.formatForFileName(to)}"
-        excelCreateLauncher.launch("DeynBook_${activeLedger?.name ?: "Ledger"}_$suffix.xlsx")
+        pendingReportExport = PendingReportExport(
+            kind = ReportExportKind.EXCEL,
+            fromTime = from,
+            toTime = to
+        )
     }
 
     fun parseBackup(uri: Uri) {
@@ -418,11 +441,8 @@ fun DeynBookAppV12(
                                     },
                                     onImportBackupFile = ::parseBackup,
                                     onExportCsv = {
-                                        viewModel.exportCsvToUriV12(
-                                            language = currentLanguage,
-                                            launchDestination = { name, _ ->
-                                                scope.launch { snackbarHostState.showSnackbar(name) }
-                                            }
+                                        pendingReportExport = PendingReportExport(
+                                            kind = ReportExportKind.CSV
                                         )
                                     },
                                     onResetAllData = { viewModel.resetEverythingV12 { showGeneralSettings = false } }
@@ -451,13 +471,19 @@ fun DeynBookAppV12(
                                         },
                                         onCallParty = { ShareHelper.dialPhoneNumber(context, it) },
                                         onShareStatementPdf = { currency, accountType ->
-                                            viewModel.shareStatementPdfV12(id, currency, accountType, currentLanguage)
+                                            pendingReportExport = PendingReportExport(
+                                                ReportExportKind.STATEMENT_PDF, id, currency, accountType
+                                            )
                                         },
                                         onShareImageCard = { currency, accountType ->
-                                            viewModel.shareImageCard(id, currency, accountType, currentLanguage)
+                                            pendingReportExport = PendingReportExport(
+                                                ReportExportKind.IMAGE_CARD, id, currency, accountType
+                                            )
                                         },
                                         onShareTextSummary = { currency, accountType ->
-                                            viewModel.shareTextSummary(id, currency, accountType, currentLanguage)
+                                            pendingReportExport = PendingReportExport(
+                                                ReportExportKind.TEXT_SUMMARY, id, currency, accountType
+                                            )
                                         },
                                         onAddTransaction = { type ->
                                             transactionToEdit = null
@@ -545,7 +571,11 @@ fun DeynBookAppV12(
                                         else viewModel.loadReportSummary(currency, from, to, partyId)
                                     },
                                     onExportCsv = { from, to ->
-                                        viewModel.requestScopedCsvExport(context, currentLanguage, from, to)
+                                        pendingReportExport = PendingReportExport(
+                                            kind = ReportExportKind.CSV,
+                                            fromTime = from,
+                                            toTime = to
+                                        )
                                     }
                                 )
 
@@ -741,6 +771,66 @@ fun DeynBookAppV12(
                         },
                         dismissButton = {
                             TextButton(onClick = { pendingRestore = null }) { Text(strings.cancel) }
+                        }
+                    )
+                }
+
+                pendingReportExport?.let { request ->
+                    ReportExportDialog(
+                        appLanguage = currentLanguage,
+                        onDismiss = { pendingReportExport = null },
+                        onConfirm = { options ->
+                            pendingReportExport = null
+                            val reportResult: (ReportExportResult) -> Unit = { result ->
+                                scope.launch {
+                                    snackbarHostState.showSnackbar(
+                                        reportExportResultMessage(currentLanguage, result)
+                                    )
+                                }
+                            }
+                            when (request.kind) {
+                                ReportExportKind.STATEMENT_PDF -> viewModel.shareStatementPdfV12(
+                                    partyId = requireNotNull(request.partyId),
+                                    currencyCode = requireNotNull(request.currencyCode),
+                                    accountType = requireNotNull(request.accountType),
+                                    options = options,
+                                    onResult = reportResult
+                                )
+                                ReportExportKind.IMAGE_CARD -> viewModel.shareImageCardTranslatedV12(
+                                    partyId = requireNotNull(request.partyId),
+                                    currencyCode = requireNotNull(request.currencyCode),
+                                    accountType = requireNotNull(request.accountType),
+                                    options = options,
+                                    onResult = reportResult
+                                )
+                                ReportExportKind.TEXT_SUMMARY -> viewModel.shareTextSummaryTranslatedV12(
+                                    partyId = requireNotNull(request.partyId),
+                                    currencyCode = requireNotNull(request.currencyCode),
+                                    accountType = requireNotNull(request.accountType),
+                                    options = options,
+                                    onResult = reportResult
+                                )
+                                ReportExportKind.CSV -> viewModel.requestScopedCsvExport(
+                                    context = context,
+                                    options = options,
+                                    fromTime = request.fromTime,
+                                    toTime = request.toTime,
+                                    onResult = reportResult
+                                )
+                                ReportExportKind.EXCEL -> {
+                                    pendingExcelOptions = options
+                                    pendingExcelRange = request.fromTime to request.toTime
+                                    val suffix = if (
+                                        request.fromTime == Long.MIN_VALUE && request.toTime == Long.MAX_VALUE
+                                    ) "all" else {
+                                        "${DateFormatter.formatForFileName(request.fromTime)}_to_" +
+                                            DateFormatter.formatForFileName(request.toTime)
+                                    }
+                                    excelCreateLauncher.launch(
+                                        "DeynBook_${activeLedger?.name ?: "Ledger"}_$suffix.xlsx"
+                                    )
+                                }
+                            }
                         }
                     )
                 }

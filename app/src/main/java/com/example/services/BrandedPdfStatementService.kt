@@ -113,13 +113,46 @@ object BrandedPdfStatementService {
         fun footer(c: Canvas) {
             paint.textAlign = Paint.Align.CENTER; paint.typeface = regular; paint.textSize = 8f; paint.color = Color.GRAY
             val note = ledger.footerNote?.takeIf { it.isNotBlank() } ?: strings.statementFooterText
+            while (paint.textSize > 5.5f && paint.measureText("$note • $pageNo") > width - margin * 2) {
+                paint.textSize -= 0.5f
+            }
             c.drawText("$note • $pageNo", width / 2f, height - 18f, paint)
+        }
+
+        fun wrapText(value: String, maxWidth: Float): List<String> {
+            if (value.isBlank()) return listOf("-")
+            val lines = mutableListOf<String>()
+            var current = ""
+            value.split(Regex("\\s+")).forEach { word ->
+                if (paint.measureText(word) > maxWidth) {
+                    if (current.isNotBlank()) { lines += current; current = "" }
+                    var fragment = ""
+                    word.forEach { char ->
+                        val candidate = fragment + char
+                        if (fragment.isNotBlank() && paint.measureText(candidate) > maxWidth) {
+                            lines += fragment
+                            fragment = char.toString()
+                        } else fragment = candidate
+                    }
+                    current = fragment
+                } else {
+                    val candidate = if (current.isBlank()) word else "$current $word"
+                    if (current.isNotBlank() && paint.measureText(candidate) > maxWidth) {
+                        lines += current
+                        current = word
+                    } else current = candidate
+                }
+            }
+            if (current.isNotBlank()) lines += current
+            return lines.ifEmpty { listOf("-") }
         }
 
         var started = startPage(); page = started.first; bitmap = started.second.first; canvas = started.second.second
         var y = tableHeader(canvas, drawInfo(canvas, drawHeader(canvas)))
-        val rowHeight = 23f
         data.rows.forEachIndexed { index, row ->
+            paint.typeface = regular; paint.textSize = 8.4f
+            val noteLines = wrapText(row.transaction.note ?: "-", 120f)
+            val rowHeight = maxOf(23f, 11f + noteLines.size * 10.5f)
             if (y + rowHeight > height - 45f) {
                 footer(canvas); page.canvas.drawBitmap(bitmap, null, RectF(0f, 0f, width.toFloat(), height.toFloat()), null); document.finishPage(page); bitmap.recycle()
                 started = startPage(); page = started.first; bitmap = started.second.first; canvas = started.second.second
@@ -128,15 +161,20 @@ object BrandedPdfStatementService {
             if (index % 2 == 1) { paint.color = Color.parseColor("#F8FAFC"); canvas.drawRect(margin, y, width - margin, y + rowHeight, paint) }
             paint.typeface = regular; paint.textSize = 8.4f; paint.color = Color.DKGRAY
             val date = DateFormatter.formatDate(row.transaction.occurredAt)
-            val note = (row.transaction.note ?: "-").let { if (it.length > 26) it.take(24) + "…" else it }
             val debt = row.debitAmount?.let { AmountFormatter.formatAmount(it, data.decimalPlaces) } ?: "-"
             val payment = row.creditAmount?.let { AmountFormatter.formatAmount(it, data.decimalPlaces) } ?: "-"
             val balance = AmountFormatter.formatAmount(row.runningBalance, data.decimalPlaces)
             if (rtl) {
-                paint.textAlign = Paint.Align.RIGHT; canvas.drawText(date, width - margin - 7f, y + 15f, paint); canvas.drawText(note, width - margin - 78f, y + 15f, paint)
+                paint.textAlign = Paint.Align.RIGHT; canvas.drawText(date, width - margin - 7f, y + 15f, paint)
+                noteLines.forEachIndexed { lineIndex, line ->
+                    canvas.drawText(line, width - margin - 78f, y + 15f + lineIndex * 10.5f, paint)
+                }
                 paint.textAlign = Paint.Align.LEFT; canvas.drawText(debt, margin + 190f, y + 15f, paint); canvas.drawText(payment, margin + 105f, y + 15f, paint); paint.typeface = bold; canvas.drawText(balance, margin + 7f, y + 15f, paint)
             } else {
-                paint.textAlign = Paint.Align.LEFT; canvas.drawText(date, margin + 7f, y + 15f, paint); canvas.drawText(note, margin + 78f, y + 15f, paint)
+                paint.textAlign = Paint.Align.LEFT; canvas.drawText(date, margin + 7f, y + 15f, paint)
+                noteLines.forEachIndexed { lineIndex, line ->
+                    canvas.drawText(line, margin + 78f, y + 15f + lineIndex * 10.5f, paint)
+                }
                 paint.textAlign = Paint.Align.RIGHT; canvas.drawText(debt, width - margin - 190f, y + 15f, paint); canvas.drawText(payment, width - margin - 105f, y + 15f, paint); paint.typeface = bold; canvas.drawText(balance, width - margin - 7f, y + 15f, paint)
             }
             y += rowHeight

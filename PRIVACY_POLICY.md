@@ -1,7 +1,7 @@
 # DeynBook Privacy Policy
 
-**Effective date:** 1 September 2026  
-**Version:** 1.0
+**Effective date:** 5 September 2026
+**Version:** 1.3
 
 DeynBook is an offline debt-recording application for individuals and small businesses. The app is designed so that ledger data stays on the user's Android device.
 
@@ -15,11 +15,13 @@ Depending on what the user enters, DeynBook may store locally:
 - Debt and payment amounts, currencies, dates and descriptions.
 - App language, theme and currency preferences.
 
-## Data collection and transmission
+## Offline operation and optional translation
 
-DeynBook 1.0 does **not** operate an application server and does not transmit ledger data to the developer. It does not use advertising SDKs, analytics SDKs, cloud databases, Firebase, remote AI services, or account sign-in.
+DeynBook does **not** operate an application server and does not transmit ledger data to the developer. It does not use advertising SDKs, analytics SDKs, cloud databases, Firebase, or account sign-in. Recording debts, calculating balances and exporting a report in its original language work locally.
 
-The Android manifest does not request the `INTERNET` permission. Android cloud backup is disabled for the application.
+When exporting or sharing a report, the user may explicitly request translation of user-entered text. If selected and Internet is available, the app sends only the text fields needed for that report—such as ledger name, customer/supplier name, address, footer and transaction notes—to Google Cloud Translation. Amount fields and the full database are not uploaded as part of the translation request, although a user may have typed personal or financial information inside a free-text field. Google processes that text under its applicable Cloud service terms and privacy documentation.
+
+The user can always select “original text,” which does not call the translation service. Translated values may be cached locally on the device to reduce repeated network requests. Android cloud backup remains disabled for the application.
 
 ## Files created by the user
 
@@ -45,7 +47,7 @@ DeynBook is a general bookkeeping utility and is not designed specifically for c
 
 ## Changes
 
-If a future DeynBook version introduces an online service or a third-party SDK that changes data practices, this policy and the Google Play Data Safety declaration must be updated before that version is released.
+This policy and the Google Play Data Safety declaration will be updated before a release that materially changes these data practices.
 
 ## Contact
 

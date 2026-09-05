@@ -13,6 +13,9 @@ jobs:
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      # Optional. When absent, every offline export mode still builds and works.
+      DEYNBOOK_TRANSLATION_API_KEY: ${{ secrets.DEYNBOOK_TRANSLATION_API_KEY }}
 
     steps:
       - name: Checkout
