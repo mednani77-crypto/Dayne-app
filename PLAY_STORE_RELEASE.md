@@ -133,7 +133,7 @@ First public release of DeynBook: offline customer/supplier debt tracking, multi
 
 ## Android permissions / capabilities
 
-The production manifest requests no dangerous runtime permissions and no `INTERNET` permission.
+The production manifest requests no dangerous runtime permissions. It requests `INTERNET` and `ACCESS_NETWORK_STATE` only for optional, user-initiated report-content translation.
 
 - `FileProvider` is used only to grant temporary read access to a PDF/image/CSV/backup file when the user explicitly shares it.
 - `ACTION_DIAL` opens the system dialer and does not require call-log or phone-call permission.
@@ -144,10 +144,11 @@ The production manifest requests no dangerous runtime permissions and no `INTERN
 
 Validate this again against the final merged binary before submission.
 
-- **Does the app collect or share user data with the developer/third parties?** No, for version 1.0 as currently implemented.
+- **Does the app collect or share user data with the developer/third parties?** The developer does not receive ledger data. When a user explicitly requests report translation, selected free-text fields are transmitted to Google Cloud Translation for processing; complete the Play declaration according to Google's current service-provider guidance.
 - **Data processed locally:** names, optional phone numbers, financial ledger entries, notes, settings.
 - **Data shared by user action:** exported statement/backup/CSV/image content can be sent to a destination chosen by the user through Android system UI. This is user-initiated sharing, not developer collection.
-- **Data encrypted in transit:** Not applicable to app-server transmission because version 1.0 has no app server and no Internet permission.
+- **Optional translation data:** ledger/customer/supplier names, address, footer and transaction notes selected for a translated report. A free-text field may itself contain personal or financial information.
+- **Data encrypted in transit:** Yes, optional translation requests use HTTPS. Other ledger processing remains local.
 - **Account creation:** No.
 - **Server-side deletion request:** Not applicable; no server account/data store. Users can delete ledger data locally from the app.
 

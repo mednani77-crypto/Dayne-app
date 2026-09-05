@@ -15,10 +15,16 @@ import com.example.data.repository.ExcelImportResult
 import com.example.services.AttachmentService
 import com.example.services.BrandedPdfStatementService
 import com.example.services.ExcelWorkbookService
+import com.example.services.ImageShareService
 import com.example.services.LocalizedCsvService
+import com.example.services.ReportExportOptions
+import com.example.services.ReportExportResult
+import com.example.services.ReportTranslationException
+import com.example.services.ReportTranslationService
 import com.example.services.ShareHelper
 import com.example.services.StatementAccountType
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -27,27 +33,126 @@ fun MainViewModel.shareStatementPdfV12(
     partyId: String,
     currencyCode: String,
     accountType: StatementAccountType,
-    language: AppLanguage
+    options: ReportExportOptions,
+    onResult: (ReportExportResult) -> Unit = {}
 ) {
     viewModelScope.launch {
-        val db = AppDatabase.getInstance(getApplication())
-        val v12 = DeynBookV12Repository(db)
-        val party = repository.getPartyWithBalancesById(partyId)?.party ?: return@launch
-        val data = buildStatementData(
-            partyId,
-            currencyCode,
-            accountType,
-            party.createdAt,
-            System.currentTimeMillis()
-        ) ?: return@launch
-        val file = BrandedPdfStatementService.generate(
-            getApplication(),
-            v12.getActiveLedger(),
-            data,
-            accountType,
-            language
-        )
-        ShareHelper.shareFile(getApplication(), file, "application/pdf", "DeynBook")
+        try {
+            val context = getApplication<Application>()
+            val db = AppDatabase.getInstance(context)
+            val v12 = DeynBookV12Repository(db)
+            val party = repository.getPartyWithBalancesById(partyId)?.party
+                ?: return@launch onResult(ReportExportResult.EXPORT_FAILED)
+            val data = buildStatementData(
+                partyId,
+                currencyCode,
+                accountType,
+                party.createdAt,
+                System.currentTimeMillis()
+            ) ?: return@launch onResult(ReportExportResult.EXPORT_FAILED)
+            val (ledger, translatedData) = ReportTranslationService(context).translateStatement(
+                v12.getActiveLedger(), data, options
+            )
+            val file = withContext(Dispatchers.IO) {
+                BrandedPdfStatementService.generate(
+                    context,
+                    ledger,
+                    translatedData,
+                    accountType,
+                    options.targetLanguage
+                )
+            }
+            ShareHelper.shareFile(context, file, "application/pdf", "DeynBook")
+            onResult(ReportExportResult.SUCCESS)
+        } catch (error: ReportTranslationException) {
+            onResult(error.result)
+        } catch (_: Exception) {
+            onResult(ReportExportResult.EXPORT_FAILED)
+        }
+    }
+}
+
+fun MainViewModel.shareImageCardTranslatedV12(
+    partyId: String,
+    currencyCode: String,
+    accountType: StatementAccountType,
+    options: ReportExportOptions,
+    onResult: (ReportExportResult) -> Unit = {}
+) {
+    viewModelScope.launch {
+        try {
+            val context = getApplication<Application>()
+            val v12 = DeynBookV12Repository(AppDatabase.getInstance(context))
+            val partyWithBalances = repository.getPartyWithBalancesById(partyId)
+                ?: return@launch onResult(ReportExportResult.EXPORT_FAILED)
+            val decimals = repository.getCurrencyByCode(currencyCode).decimalPlaces
+            val balance = partyWithBalances.getBalanceForCurrency(currencyCode)
+                ?: com.example.data.models.PartyCurrencyBalance(currencyCode, decimals)
+            val recent = repository.getTransactionsForPartyFlow(partyId).first()
+                .filter { it.currencyCode == currencyCode }
+                .filter {
+                    val receivable = com.example.data.models.TransactionType.from(it.transactionType).isReceivableImpact
+                    if (accountType == StatementAccountType.CUSTOMER) receivable else !receivable
+                }
+                .sortedByDescending { it.occurredAt }
+                .take(5)
+            val translated = ReportTranslationService(context).translateExportData(
+                v12.getActiveLedger(), listOf(partyWithBalances.party), recent, options
+            )
+            val file = withContext(Dispatchers.IO) {
+                ImageShareService.generateSummaryCardImage(
+                    context = context,
+                    businessName = translated.first.name,
+                    party = translated.second.first(),
+                    balance = balance,
+                    accountType = accountType,
+                    recentTransactions = translated.third,
+                    language = options.targetLanguage
+                )
+            }
+            ShareHelper.shareFile(context, file, "image/png", "DeynBook")
+            onResult(ReportExportResult.SUCCESS)
+        } catch (error: ReportTranslationException) {
+            onResult(error.result)
+        } catch (_: Exception) {
+            onResult(ReportExportResult.EXPORT_FAILED)
+        }
+    }
+}
+
+fun MainViewModel.shareTextSummaryTranslatedV12(
+    partyId: String,
+    currencyCode: String,
+    accountType: StatementAccountType,
+    options: ReportExportOptions,
+    onResult: (ReportExportResult) -> Unit = {}
+) {
+    viewModelScope.launch {
+        try {
+            val context = getApplication<Application>()
+            val v12 = DeynBookV12Repository(AppDatabase.getInstance(context))
+            val partyWithBalances = repository.getPartyWithBalancesById(partyId)
+                ?: return@launch onResult(ReportExportResult.EXPORT_FAILED)
+            val decimals = repository.getCurrencyByCode(currencyCode).decimalPlaces
+            val balance = partyWithBalances.getBalanceForCurrency(currencyCode)
+                ?: com.example.data.models.PartyCurrencyBalance(currencyCode, decimals)
+            val translated = ReportTranslationService(context).translateExportData(
+                v12.getActiveLedger(), listOf(partyWithBalances.party), emptyList(), options
+            )
+            ShareHelper.shareTextSummary(
+                context = context,
+                businessName = translated.first.name,
+                party = translated.second.first(),
+                balance = balance,
+                accountType = accountType,
+                language = options.targetLanguage
+            )
+            onResult(ReportExportResult.SUCCESS)
+        } catch (error: ReportTranslationException) {
+            onResult(error.result)
+        } catch (_: Exception) {
+            onResult(ReportExportResult.EXPORT_FAILED)
+        }
     }
 }
 
@@ -88,28 +193,39 @@ fun MainViewModel.deleteAttachmentV12(attachment: TransactionAttachmentEntity) {
 
 fun MainViewModel.exportExcelV12(
     uri: Uri,
-    language: AppLanguage,
+    options: ReportExportOptions,
     fromTime: Long = Long.MIN_VALUE,
-    toTime: Long = Long.MAX_VALUE
+    toTime: Long = Long.MAX_VALUE,
+    onResult: (ReportExportResult) -> Unit = {}
 ) {
     viewModelScope.launch {
-        val context = getApplication<Application>()
-        val v12 = DeynBookV12Repository(AppDatabase.getInstance(context))
-        val ledger = v12.getActiveLedger()
-        val parties = v12.getScopedParties()
-        val transactions = v12.getScopedTransactions().filter {
-            it.occurredAt in minOf(fromTime, toTime)..maxOf(fromTime, toTime)
-        }
-        withContext(Dispatchers.IO) {
-            context.contentResolver.openOutputStream(uri, "w")?.use { output ->
-                ExcelWorkbookService.writeTransactionsWorkbook(
-                    output,
-                    ledger,
-                    parties,
-                    transactions,
-                    language
-                )
+        try {
+            val context = getApplication<Application>()
+            val v12 = DeynBookV12Repository(AppDatabase.getInstance(context))
+            val ledger = v12.getActiveLedger()
+            val parties = v12.getScopedParties()
+            val transactions = v12.getScopedTransactions().filter {
+                it.occurredAt in minOf(fromTime, toTime)..maxOf(fromTime, toTime)
             }
+            val translated = ReportTranslationService(context).translateExportData(
+                ledger, parties, transactions, options
+            )
+            withContext(Dispatchers.IO) {
+                context.contentResolver.openOutputStream(uri, "w")?.use { output ->
+                    ExcelWorkbookService.writeTransactionsWorkbook(
+                        output,
+                        translated.first,
+                        translated.second,
+                        translated.third,
+                        options.targetLanguage
+                    )
+                } ?: error("Cannot open output")
+            }
+            onResult(ReportExportResult.SUCCESS)
+        } catch (error: ReportTranslationException) {
+            onResult(error.result)
+        } catch (_: Exception) {
+            onResult(ReportExportResult.EXPORT_FAILED)
         }
     }
 }
@@ -142,61 +258,45 @@ fun MainViewModel.importExcelV12(uri: Uri, onResult: (ExcelImportResult?) -> Uni
     }
 }
 
-/** Settings all-time CSV: active ledger only, localized to the current app language. */
-fun MainViewModel.exportCsvToUriV12(
-    language: AppLanguage,
-    launchDestination: (String, (Uri) -> Unit) -> Unit
-) {
-    viewModelScope.launch {
-        val context = getApplication<Application>()
-        val v12 = DeynBookV12Repository(AppDatabase.getInstance(context))
-        val ledger = v12.getActiveLedger()
-        val parties = v12.getScopedParties()
-        val txs = v12.getScopedTransactions()
-        val csv = LocalizedCsvService.generate(
-            transactions = txs,
-            partiesById = parties.associateBy { it.id },
-            language = language
-        )
-        val file = withContext(Dispatchers.IO) {
-            File(
-                context.cacheDir,
-                "DeynBook_${ledger.name.replace(Regex("[^\\p{L}\\p{N}_-]"), "_")}_all_${DateFormatter.formatForFileName(System.currentTimeMillis())}.csv"
-            ).apply { writeText(csv, Charsets.UTF_8) }
-        }
-        ShareHelper.shareFile(context, file, "text/csv", "DeynBook CSV")
-        launchDestination(file.name) { }
-    }
-}
-
 /** Reports CSV with the selected date range, active ledger only. */
 fun MainViewModel.requestScopedCsvExport(
     context: Context,
-    language: AppLanguage,
+    options: ReportExportOptions,
     fromTime: Long,
-    toTime: Long
+    toTime: Long,
+    onResult: (ReportExportResult) -> Unit = {}
 ) {
     viewModelScope.launch {
-        val v12 = DeynBookV12Repository(AppDatabase.getInstance(context.applicationContext))
-        val ledger = v12.getActiveLedger()
-        val parties = v12.getScopedParties()
-        val start = minOf(fromTime, toTime)
-        val end = maxOf(fromTime, toTime)
-        val txs = v12.getScopedTransactions().filter { it.occurredAt in start..end }
-        val csv = LocalizedCsvService.generate(
-            transactions = txs,
-            partiesById = parties.associateBy { it.id },
-            language = language,
-            fromTimestamp = start,
-            toTimestamp = end
-        )
-        val file = withContext(Dispatchers.IO) {
-            File(
-                context.cacheDir,
-                "DeynBook_${ledger.name.replace(Regex("[^\\p{L}\\p{N}_-]"), "_")}_${DateFormatter.formatForFileName(start)}_to_${DateFormatter.formatForFileName(end)}.csv"
-            ).apply { writeText(csv, Charsets.UTF_8) }
+        try {
+            val v12 = DeynBookV12Repository(AppDatabase.getInstance(context.applicationContext))
+            val originalLedger = v12.getActiveLedger()
+            val originalParties = v12.getScopedParties()
+            val start = minOf(fromTime, toTime)
+            val end = maxOf(fromTime, toTime)
+            val originalTxs = v12.getScopedTransactions().filter { it.occurredAt in start..end }
+            val (ledger, parties, txs) = ReportTranslationService(context).translateExportData(
+                originalLedger, originalParties, originalTxs, options
+            )
+            val csv = LocalizedCsvService.generate(
+                transactions = txs,
+                partiesById = parties.associateBy { it.id },
+                language = options.targetLanguage,
+                fromTimestamp = start,
+                toTimestamp = end
+            )
+            val file = withContext(Dispatchers.IO) {
+                File(
+                    context.cacheDir,
+                    "DeynBook_${ledger.name.replace(Regex("[^\\p{L}\\p{N}_-]"), "_")}_${DateFormatter.formatForFileName(start)}_to_${DateFormatter.formatForFileName(end)}.csv"
+                ).apply { writeText(csv, Charsets.UTF_8) }
+            }
+            ShareHelper.shareFile(context, file, "text/csv", "DeynBook CSV")
+            onResult(ReportExportResult.SUCCESS)
+        } catch (error: ReportTranslationException) {
+            onResult(error.result)
+        } catch (_: Exception) {
+            onResult(ReportExportResult.EXPORT_FAILED)
         }
-        ShareHelper.shareFile(context, file, "text/csv", "DeynBook CSV")
     }
 }
 

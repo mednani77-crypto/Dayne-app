@@ -8,9 +8,10 @@ DeynBook is an offline-first Android debt ledger for small shops, traders and pe
 - Keeps customer and supplier ledgers separate even when the same person is both.
 - Supports DJF, ETB, SOS, SLS, USD and KES plus custom currencies.
 - Supports Arabic, Somali, Amharic, French and English.
-- Works without an Internet connection or user account.
+- All bookkeeping and standard report export works without an Internet connection or user account.
 - Generates statement PDFs, shareable summary images and text summaries.
-- Exports Excel-friendly CSV files.
+- Exports localized PDF, image, text, CSV and Excel reports independently of the app language.
+- Optionally translates user-entered report content when the user requests it and Internet is available.
 - Creates and restores local JSON backups.
 - Includes daily, 7-day, 30-day, monthly and custom-period reports.
 
@@ -23,7 +24,7 @@ DeynBook is an offline-first Android debt ledger for small shops, traders and pe
 - Android SDK 36
 - Minimum Android SDK 23
 
-The production manifest intentionally requests no `INTERNET` permission and Android cloud backup is disabled.
+The app requests `INTERNET` only for the optional, user-initiated report-content translation feature. Android cloud backup is disabled.
 
 ## Project structure
 
@@ -81,13 +82,25 @@ Built-in currencies are defined in `AppDatabase.kt`. A user can also create a cu
 
 Language metadata and localized strings live under `core/localization`. Any new language must include all user-facing strings, correct text direction and PDF/image rendering validation.
 
+## Optional online report translation
+
+Built-in report labels are translated locally and never need Internet. Users can additionally choose original content, translated content, or a bilingual report for names, notes, ledger identity and other user-entered text. Online translation uses Google Cloud Translation only after the user selects a translation mode.
+
+The API key is deliberately absent from the repository. Configure it with one of these sources before producing a translation-enabled build:
+
+- `DEYNBOOK_TRANSLATION_API_KEY` environment variable;
+- `DEYNBOOK_TRANSLATION_API_KEY` Gradle property; or
+- `DEYNBOOK_TRANSLATION_API_KEY=...` in the untracked `local.properties` file.
+
+Restrict the key to the Cloud Translation API and the Android package/signing certificate. Builds without a key keep all offline export modes available and show a clear message if online translation is requested.
+
 ## Database migrations
 
 Room destructive migration fallback is intentionally disabled. When increasing the Room schema version, add an explicit migration and tests so existing ledger data is never silently wiped.
 
 ## Privacy
 
-DeynBook 1.0 has no application server, advertising SDK, analytics SDK, cloud database or remote AI SDK. Ledger data stays on device unless the user explicitly exports or shares a file. See `PRIVACY_POLICY.md`.
+DeynBook has no application server, advertising SDK, analytics SDK, cloud database or account system. Ledger data stays on device unless the user explicitly exports/shares a file or requests online translation of entered report text. See `PRIVACY_POLICY.md`.
 
 ## Release checklist
 

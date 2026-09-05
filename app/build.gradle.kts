@@ -1,9 +1,21 @@
+import java.util.Properties
+
 plugins {
   alias(libs.plugins.android.application)
   alias(libs.plugins.kotlin.compose)
   alias(libs.plugins.google.devtools.ksp)
   alias(libs.plugins.roborazzi)
 }
+
+val localProperties = Properties().apply {
+  val file = rootProject.file("local.properties")
+  if (file.exists()) file.inputStream().use(::load)
+}
+val translationApiKey = providers.environmentVariable("DEYNBOOK_TRANSLATION_API_KEY")
+  .orElse(providers.gradleProperty("DEYNBOOK_TRANSLATION_API_KEY"))
+  .getOrElse(localProperties.getProperty("DEYNBOOK_TRANSLATION_API_KEY", ""))
+  .replace("\\", "\\\\")
+  .replace("\"", "\\\"")
 
 android {
   namespace = "com.example"
@@ -13,10 +25,13 @@ android {
     applicationId = "com.mohamadhafed.deynbook"
     minSdk = 23
     targetSdk = 36
-    versionCode = 3
-    versionName = "1.2.0"
+    versionCode = 4
+    versionName = "1.3.0"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    // The key is supplied by local.properties, a Gradle property, or CI environment.
+    // It is intentionally never committed to source control.
+    buildConfigField("String", "TRANSLATION_API_KEY", "\"$translationApiKey\"")
   }
 
   buildTypes {
